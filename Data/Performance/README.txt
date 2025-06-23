@@ -1,0 +1,1 @@
+This folder is meant to contain the accuracy and run times of networks trained with and without splitting steepest descent.
