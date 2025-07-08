@@ -1,0 +1,1 @@
+This folder is meant to contain weights recorded during training to either make UMAP visualizations or movies.

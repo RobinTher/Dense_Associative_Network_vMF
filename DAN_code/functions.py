@@ -4,25 +4,44 @@ import numpy as np
 import jax.numpy as jnp
 
 def sqrt1pm1(x):
+    '''
+    Helper function.
+    '''
     return np.where(x < 1, x / ((1 + x)**(1/2) + 1), (1 + x)**(1/2) - 1)
 
 def jax_sqrt1pm1(x):
+    '''
+    Helper function for JAX. Currently not used.
+    '''
     return jnp.where(x < 1, x / ((1 + x)**(1/2) + 1), (1 + x)**(1/2) - 1)
 
 def log1p_sqrt1p_mlog2(x):
+    '''
+    Helper function.
+    '''
     return 1/2 * np.log1p(x) + np.log1p(1/(1 + x)**(1/2)) - np.log(2)
 
 def jax_log1p_sqrt1p_mlog2(x):
+    '''
+    Helper function for JAX. Currently not used.
+    '''
     return 1/2 * jnp.log1p(x) + jnp.log1p(1/(1 + x)**(1/2)) - jnp.log(2)
 
 ### Calculate correlation(w, x) when w and x are numpy arrays
 def dense_cor(x, w):
+    '''
+    Calculate the cosine similarity or Pearson correlation between x and w.
+    w is assumed to be normalized.
+    '''
     x = x / np.sum(x**2, axis = 1, keepdims = True)**(1/2)
     
     return x @ w
 
 ### Softmax (or Boltzmann distribution) along axis
 def softmax(f, tau = -np.inf, axis = None):
+    '''
+    Softmax function along axis with an additional weight exp(tau) in the denominator.
+    '''
     c = np.max(f, axis = axis, keepdims = True)
     c = np.maximum(c, tau)
     
@@ -63,7 +82,10 @@ def weighed_softmax(f, g, tau = -np.inf, target_y = None, softening = 0):
 #    return 1/2 * np.log(2) + 1/2 * (N - 1) * np.log(np.pi) - 1/2 * (N + 1) * np.log(N/2 - 1) + 1/2 * N - 1
 
 def log_gamma_ratio(beta, N):
-    
+    '''
+    Calculate log(Omega_N(beta)/Omega_N(0)), with Omega_N(kappa) defined in the paper.
+    We use the large N approximation of Appendix B for simplicity.
+    '''
     rho = beta / (N - 2)
     two_rho_squared = (2 * rho)**2
     
@@ -74,7 +96,11 @@ def log_gamma_ratio(beta, N):
     return tau
 
 def jax_log_gamma_ratio(beta, N):
-    
+    '''
+    Calculate log(Omega_N(beta)/Omega_N(0)), with Omega_N(kappa) defined in the paper.
+    We use the large N approximation of Appendix B for simplicity.
+    This is the JAX version, which is currently not used.
+    '''
     rho = beta / (N - 2)
     two_rho_squared = (2 * rho)**2
     
@@ -85,6 +111,10 @@ def jax_log_gamma_ratio(beta, N):
     return tau
 
 def unaveraged_rayleigh_quotient(beta, h, x, w, u):
+    '''
+    Calculate the function F(phi ; theta, x) of the paper (see Appendix H),
+    where phi = u, theta = w and h = x @ w.
+    '''
     w_u = k.sum(w * u, axis = 0)
     x_u = k.dot(x, u)
     
@@ -96,22 +126,14 @@ def unaveraged_rayleigh_quotient(beta, h, x, w, u):
     
     return q
 
-def row_shifted_exp(tensor):
-    return k.exp(tensor - k.max(tensor, axis = 1, keepdims = True))
-    #def inner_row_shifted_exp():
-    #    return k.exp(tensor - k.max(tensor, axis = 1, keepdims = True))
-    #
-    #return inner_row_shifted_exp
-
-def col_shifted_exp(tensor):
-    return k.exp(tensor - k.max(tensor, axis = 0, keepdims = True))
-    #def inner_col_shifted_exp():
-    #    return k.exp(tensor - k.max(tensor, axis = 0, keepdims = True))
-    #
-    #return inner_col_shifted_exp
-
 def k_mins(values, k = 1):
+    '''
+    Return the k smallest values in a tensor.
+    '''
     return -tf.math.top_k(-values, k)[0]
 
 def kth_min(values, k = 1):
+    '''
+    Return the k-th smallest value in a tensor.
+    '''
     return k_mins(values, k)[-1]

@@ -1,10 +1,9 @@
 from tensorflow.keras import backend as k
 import tensorflow as tf
 import numpy as np
-# import scipy.special as spec
 
 from tensorflow.keras.layers import Layer
-from tensorflow.keras.initializers import Constant, RandomNormal, Orthogonal
+from tensorflow.keras.initializers import Constant, Orthogonal
 from tensorflow.keras.saving import deserialize_keras_object
 
 import DAN_code.initializers as init
@@ -12,18 +11,35 @@ import DAN_code.constraints as constr
 import DAN_code.normalization as norm
 import DAN_code.functions as func
 
-eps = np.finfo(np.float32).eps
-logzero = -np.float32(151*np.log(2))
-# eps = np.float32(eps**(1/2))
-# eps = 0
-
 class Normalize(Layer):
+    '''
+    If normalize_online is True, normalize the input tensor along axis = 1
+    by subtracting the mean and dividing by the two-norm.
+    Otherwise, the input tensor is returned unchanged.
+
+    Attributes
+    ----------
+    normalize_online : bool
+        If True, normalize the input tensor online.
+        Otherwise, it is assumed to be already normalized, so the the normalization is skipped.
+    '''
     def __init__(self, normalize_online, **kwargs):
         super(Normalize, self).__init__(**kwargs)
         self.normalize_online = normalize_online
     
     def call(self, x):
-        
+        '''
+        Call the layer on x, normalizing it if normalize_online is True.
+
+        Parameters
+        ----------
+        x : tf.Tensor
+            The input tensor.
+        Returns
+        -------
+        x : tf.Tensor
+            The normalized input tensor.
+        '''
         if self.normalize_online:
             x = x - k.mean(x, axis = 1, keepdims = True)
             x = norm.tensor_normalize(x, norm.tensor_two_norm(x, axis = 1))
@@ -36,66 +52,25 @@ class Normalize(Layer):
         config.update({"normalize_online" : self.normalize_online})
         return config
 
-### Layer that computes w @ x using a dense dot product
-class DenseNormalDot(Layer):
-    
-    def __init__(self, output_size, max_output_size, beta_init, **kwargs):
-        super(DenseNormalDot, self).__init__(**kwargs)
-        
-        self.output_size = output_size
-
-        self.max_output_size = max_output_size
-        
-        self.beta_init = beta_init
-    
-    def build(self, input_shape):
-        # Create a trainable weight variable for this layer.
-        self.kernel = self.add_weight(name = "memory_kernel",
-                                      shape = (input_shape[1], self.max_output_size),
-                                      initializer = init.RandomNormal(self.output_size),
-                                      trainable = True)
-        
-        self.eigvecs = self.add_weight(name = "eigvec_kernel",
-                                       shape = (input_shape[1], self.max_output_size),
-                                       initializer = init.RandomSpherical(self.output_size),
-                                       constraint = constr.UnitTwoNorm(self.output_size, axis = 0),
-                                       trainable = True)
-        
-        self.beta = self.add_weight(name = "beta", shape = (),
-                                    initializer = Constant(self.beta_init),
-                                    trainable = False)
-    
-    def call(self, x, training = None):
-        
-        @tf.custom_gradient
-        def stop_activation(activation):
-            def grad(stream):
-                return stream
-            
-            return 0 * activation, grad
-        
-        kernel = self.kernel[:, : self.output_size]
-        eigvecs = self.eigvecs[:, : self.output_size]
-        
-        h = self.beta * k.dot(x, kernel) - 1/2 * self.beta * k.sum(kernel**2, axis = 0, keepdims = True)
-        
-        q = stop_activation(self.beta**2 * (k.dot(x, eigvecs) - k.sum(k.stop_gradient(kernel) * eigvecs, axis = 0))**2 - self.beta)
-        
-        return [h + tf.math.log1p(q), -1/2 * self.beta * k.sum(x**2, axis = 1, keepdims = True)]
-    
-    # To support serialization
-    def get_config(self):
-        config = super(DenseNormalDot, self).get_config()
-        config.update({"output_size" : self.output_size, "max_output_size" : self.max_output_size,
-                       "beta_init" : self.beta_init})
-        return config
-    
-    def compute_output_shape(self, input_shape):
-        return (input_shape[0], self.output_size)
-
-### Layer that computes correlation(w, x) using a dense dot product
 class DenseCor(Layer):
-    
+    '''
+    Calculate the rescaled dot product beta * x @ w, between the data layer x of the DAN
+    and its memories w, where the rescaling factor beta is the inverse temperature
+    defined in the paper. The data layer is assumed to be normalized so that the output
+    is the rescaled cosine similarity or Pearson correlation between the data and the memories.
+
+    Attributes
+    ----------
+    output_size : int
+        The number of hidden units that are connected to the layer at the start of training.
+    max_output_size : int
+        The maximum number of hidden units that can be connected to this layer.
+        Weights for hidden units number output_size+1 to max_output_size are preallocated
+        at initialization, but not immediately used in the network. Weights for these
+        hidden units are built during training using splitting steepest descent.
+    beta_init : float
+        The initial value of the inverse temperature beta, used to scale the output.
+    '''
     def __init__(self, output_size, max_output_size, beta_init, **kwargs):
         super(DenseCor, self).__init__(**kwargs)
         
@@ -106,28 +81,69 @@ class DenseCor(Layer):
         self.beta_init = beta_init
     
     def build(self, input_shape):
-        # Create a trainable weight variable for this layer.
-        # Try w = q c
+        '''
+        Add weights to the layer. self.kernel contains the DAN memories,
+        self.eigvecs contains the eigenvectors used for splitting steepest descent,
+        and self.beta is the inverse temperature used to scale the output.
+
+        Parameters
+        ----------
+        input_shape : tuple
+            The shape of the input tensor, which is expected to be of the form
+            (batch_size, input_size). input_size is the number of input activations.
+        '''
         self.kernel = self.add_weight(name = "memory_kernel",
                                       shape = (input_shape[1], self.max_output_size),
                                       initializer = init.RandomSpherical(self.output_size),
-                                      constraint = constr.UnitTwoNorm(self.output_size, axis = 0),
+                                      constraint = constr.UnitTwoNorm(self.output_size),
                                       trainable = True)
         
         self.eigvecs = self.add_weight(name = "eigvec_kernel",
                                        shape = (input_shape[1], self.max_output_size),
                                        initializer = init.RandomSpherical(self.output_size),
-                                       constraint = constr.UnitTwoNorm(self.output_size, axis = 0),
+                                       constraint = constr.UnitTwoNorm(self.output_size),
                                        trainable = True)
         
         self.beta = self.add_weight(name = "beta", shape = (),
                                     initializer = Constant(self.beta_init),
                                     trainable = False)
     
-    def call(self, x, training = None):
-        
+    def call(self, x):
+        '''
+        Call the layer. The unveraged_rayleigh_quotient function, which evaluates
+        the function F(phi ; theta, x) of the paper (see Appendix H),
+        is included in the calculations in such a way that it does not contribute
+        to the output activation, but only to the gradient with respect to self.eigvecs,
+        which is used to learn self.eigvecs during the splitting phase of training.
+
+        Parameters
+        ----------
+        x : tf.Tensor
+            The data layer, which is assumed to be normalized.
+        Returns
+        -------
+        tf.Tensor
+            Dot product between the data layer and the DAN memories,
+            scaled by the inverse temperature beta.
+        '''
         @tf.custom_gradient
-        def silent_normalization(kernel):
+        def project_gradient(kernel):
+            '''
+            Project the gradient with respect to the input kernel onto its orthogonal complement,
+            also known as the tangent space (see Appendix F).
+            
+            Parameters
+            ----------
+            kernel : tf.Tensor
+                The kernel whose gradient is to be projected.
+            Returns
+            -------
+            kernel : tf.Tensor
+                The input kernel.
+            grad : function
+                A function that projects the gradient with respect to the input kernel
+                onto its orthogonal complement.
+            '''
             def grad(upstream):
                 downstream = upstream - k.sum(upstream * kernel, axis = 0) * kernel
                 return downstream
@@ -136,12 +152,27 @@ class DenseCor(Layer):
         
         @tf.custom_gradient
         def stop_activation(activation):
+            '''
+            Multiply the input activation by zero and return a custom gradient function
+            that returns the upstream gradient unchanged.
+
+            Parameters
+            ----------
+            activation : tf.Tensor
+                The input activation to be multiplied by zero.
+            Returns
+            -------
+            activation : tf.Tensor
+                The input activation multiplied by zero.
+            grad : function
+                A function that returns the upstream gradient unchanged.
+            '''
             def grad(stream):
                 return stream
             
             return 0 * activation, grad
         
-        kernel = silent_normalization(self.kernel[:, : self.output_size])
+        kernel = project_gradient(self.kernel[:, : self.output_size])
         eigvecs = self.eigvecs[:, : self.output_size]
         
         h = k.dot(x, kernel)
@@ -158,6 +189,18 @@ class DenseCor(Layer):
         return config
     
     def compute_output_shape(self, input_shape):
+        '''
+        Compute the output shape of the layer.
+        Parameters
+        ----------
+        input_shape : tuple
+            The shape of the input tensor, which is expected to be of the form
+            (batch_size, input_size).
+        Returns
+        -------
+        tuple
+            The shape of the output tensor.
+        '''
         return (input_shape[0], self.output_size)
 
 class DenseOrth(Layer):
@@ -181,10 +224,10 @@ class DenseOrth(Layer):
                                       #constraint = constr.Orthogonal(self.input_size, self.output_size),
                                       trainable = True)
         
-    def call(self, x, training = None):
+    def call(self, x):
         
         @tf.custom_gradient
-        def silent_normalization(kernel):
+        def project_gradient(kernel):
             def grad(upstream):
                 reg = k.dot(kernel, tf.transpose(upstream))
                 downstream = upstream - k.dot(kernel, (reg + tf.transpose(reg))/2)
@@ -192,7 +235,7 @@ class DenseOrth(Layer):
             
             return kernel, grad
         
-        kernel = silent_normalization(self.kernel[: self.input_size, : self.output_size])
+        kernel = project_gradient(self.kernel[: self.input_size, : self.output_size])
         
         return k.dot(x, kernel)
     
@@ -205,117 +248,32 @@ class DenseOrth(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], self.output_size)
 
-### Layer that computes log(correlation(w, x)) using a dense dot product
-class LogDenseCor(Layer):
-
-    def __init__(self, number_memories, w_mean, noise, **kwargs):
-        self.number_memories = number_memories
-        self.w_mean = w_mean
-        self.noise = noise
-        super(LogDenseCor, self).__init__(**kwargs)
-    
-    def build(self, input_shape):
-        # Create a trainable weight variable for this layer.
-        self.kernel = self.add_weight(name = "kernel",
-                                      shape = (input_shape[1], self.number_memories),
-                                      initializer = init.ClusteredNormal(self.w_mean, self.noise, 1, axis = (0,)),
-                                      constraint = constr.UnitTwoNorm(axis = 0),
-                                      trainable = True)
-        self.kernel.norm_order = "two"
-        # Axes occupied by individual feature detectors
-        self.kernel.axis = (0,)
-        super(LogDenseCor, self).build(input_shape)
-    
-    def call(self, x):
-        
-        x = x - k.mean(x, axis = 1, keepdims = True)
-        x_var = k.sum(x**2, axis = 1, keepdims = True)
-        x_is_blank = x_var == 0.
-        
-        # w = self.kernel / k.stop_gradient(k.maximum(k.max(self.kernel, axis = 0, keepdims = True), -k.min(self.kernel, axis = 0, keepdims = True)))
-        h = k.log(tf.where(x_is_blank, 1., k.abs(k.dot(x, self.kernel))))
-        h = h - (k.log(k.sum(self.kernel**2, axis = 0, keepdims = True))
-                 + k.log(tf.where(x_is_blank, 1., x_var))) / 2
-        
-        return tf.where(x_is_blank, logzero, h)
-    
-    # To support serialization
-    def get_config(self):
-        base_config = super(LogDenseCor, self).get_config()
-        return {**base_config, "number_memories" : self.number_memories, "w_mean" : self.w_mean, "noise" : self.noise}
-    
-    def compute_output_shape(self, input_shape):
-        return (input_shape[0], self.number_memories)
-
-### Layer that computes log(dot(g, exp(beta*h))) using a dense dot product
-class LogDenseNormalExp(Layer):
-    
-    def __init__(self, number_constraint_iterations, max_input_size,
-                 output_size, prior_y = None, **kwargs):
-        super(LogDenseNormalExp, self).__init__(**kwargs)
-        
-        self.number_constraint_iterations = number_constraint_iterations
-        
-        self.max_input_size = max_input_size
-
-        self.output_size = output_size
-        
-        if prior_y is None:
-            self.prior_y = tf.Variable(tf.ones((output_size,)) / output_size, trainable = False)
-        else:
-            self.prior_y = tf.Variable(tf.convert_to_tensor(prior_y, dtype = "float32"),
-                                       trainable = False)
-    
-    def build(self, input_shape):
-        self.input_size = input_shape[0][1]
-        
-        self.counts_memory = self.add_weight(name = "count_kernel",
-                                             shape = (self.max_input_size + 1, 1),
-                                             initializer = "ones",
-                                             trainable = False)
-        
-        self.counts_memory[self.input_size].assign(self.input_size/self.max_input_size)
-        #self.counts_memory[self.input_size].assign(0)
-        
-        # Create a trainable weight variable for this layer.
-        self.kernel = self.add_weight(name = "weigh_kernel",
-                                      shape = (self.max_input_size + 1, self.output_size + 1),
-                                      initializer = init.Categorical(self.prior_y, self.input_size),
-                                      constraint = constr.AltOneNorm(self.input_size,
-                                                                     self.prior_y, self.counts_memory,
-                                                                     self.number_constraint_iterations),
-                                      trainable = True)
-    
-    def call(self, h):
-        
-        @tf.custom_gradient
-        def silent_normalization(kernel):
-            def grad(upstream):
-                
-                downstream = upstream - k.sum(upstream * kernel, axis = 1, keepdims = True) / self.counts_memory[: self.input_size + 1]
-                
-                return downstream
-            
-            return kernel, grad
-        
-        kernel = silent_normalization(self.kernel[: self.input_size + 1])
-        
-        c = k.stop_gradient(k.max(h[0], axis = 1, keepdims = True))
-        c = k.stop_gradient(k.maximum(c, 0))
-        
-        return c + k.log(k.dot(k.exp(h[0] - c), kernel[: -1]) + k.exp(0 - c) * kernel[-1 :]) + h[1]
-    
-    # To support serialization
-    def get_config(self):
-        config = super(LogDenseNormalExp, self).get_config()
-        config.update({"number_constraint_iterations" : self.number_constraint_iterations,
-                       "max_input_size" : self.max_input_size, "output_size" : self.output_size,
-                       "prior_y" : self.prior_y.value()})
-        return config
-
-### Layer that computes log(dot(g, exp(beta*h))) using a dense dot product
 class LogDenseExp(Layer):
-    
+    '''
+    Calculate the shifted log dot product log(exp(h) @ g + Omega_N(beta)/Omega_N(0) * g_0)
+    between the output h of the LogDenseCor layer h and the DAN class weights g and g_0.
+    inverse temperature beta and Omega_N(kappa) are defined in the paper.
+
+    Attributes
+    ----------
+    number_constraint_iterations : int
+        The number of iterations to run the Sinkhorn-Knopp algorithm for the AltOneNorm constraint.
+    input_size : int
+        The number of input activations, which is inferred from the argument of the build method.
+    max_input_size : int
+        The maximum number of input activations, each corresponding to a hidden unit.
+        Weights for hidden units number input_size+1 to max_input_size are preallocated
+        at initialization, but not immediately used in the network. Weights for these
+        hidden units are built during training using splitting steepest descent.
+    output_size : int
+        The number of classes in the DAN.
+    tau_init : float
+        The initial value of the tau parameter, calculated as tau = log(Omega_N(beta_init)/Omega_N(0))
+        for a given initial inverse temperature beta_init in the models module.
+    prior_y : tf.Variable, optional
+        A prior distribution over the classes. If None, it is initialized to a uniform distribution.
+        Defaults to None.
+    '''
     def __init__(self, number_constraint_iterations, max_input_size,
                  output_size, tau_init, prior_y = None, **kwargs):
         super(LogDenseExp, self).__init__(**kwargs)
@@ -329,15 +287,24 @@ class LogDenseExp(Layer):
         self.tau_init = tau_init
         
         if prior_y is None:
-            #self.prior_y_init = np.ones((output_size,)) / output_size
             self.prior_y = tf.Variable(tf.ones((output_size,)) / output_size, trainable = False)
         
         else:
-            #self.prior_y_init = prior_y
             self.prior_y = tf.Variable(tf.convert_to_tensor(prior_y, dtype = "float32"),
                                        trainable = False)
     
     def build(self, input_shape):
+        '''
+        Add weights to the layer. self.kernel contains the DAN class weights g and g_0,
+        in this order, self.counts_memory is used to normalize the rows of self.kernel,
+        and self.tau is log(Omega_N(beta)/Omega_N(0)) for a given inverse temperature beta.
+
+        Parameters
+        ----------
+        input_shape : tuple
+            The shape of the input tensor, which is expected to be of the form
+            (batch_size, input_size). input_size is the number of input activations.
+        '''
         self.input_size = input_shape[1]
         
         self.counts_memory = self.add_weight(name = "count_kernel",
@@ -346,13 +313,7 @@ class LogDenseExp(Layer):
                                              trainable = False)
         
         self.counts_memory[self.input_size].assign(self.input_size/self.max_input_size)
-        #self.counts_memory[self.input_size].assign(0)
         
-        #self.prior_y = self.add_weight(name = "prior_y", shape = (self.output_size + 1,),
-        #                               initializer = Constant(self.prior_y_init),
-        #                               trainable = False)
-        
-        # Create a trainable weight variable for this layer.
         self.kernel = self.add_weight(name = "weigh_kernel",
                                       shape = (self.max_input_size + 1, self.output_size + 1),
                                       initializer = init.Categorical(self.prior_y, self.input_size),
@@ -366,20 +327,45 @@ class LogDenseExp(Layer):
                                    trainable = False)
     
     def call(self, h):
-        
+        '''
+        Call the layer. Use the logsumexp trick for numerical stability.
+
+        Parameters
+        ----------
+        h : tf.Tensor
+            The output of the LogDenseCor layer.
+        Returns
+        -------
+        tf.Tensor
+            The shifted log dot product between exp(h) and the DAN class weights.
+        '''
         @tf.custom_gradient
-        def silent_normalization(kernel):
+        def project_gradient(kernel):
+            '''
+            Approximately project the gradient with respect to the input kernel onto
+            its orthogonal complement, also known as the tangent space (see Appendix F).
+            
+            Parameters
+            ----------
+            kernel : tf.Tensor
+                The kernel whose gradient is to be projected.
+            Returns
+            -------
+            kernel : tf.Tensor
+                The input kernel.
+            grad : function
+                A function that projects the gradient with respect to the input kernel
+                onto its orthogonal complement.
+            '''
             def grad(upstream):
                 
                 downstream = upstream - k.sum(upstream * kernel, axis = 1, keepdims = True) / self.counts_memory[: self.input_size + 1]
-                
-                #downstream = ((self.input_size + self.counts_memory[self.input_size]) * self.prior_y - kernel) * (self.counts_memory[: self.input_size + 1] - kernel) / ((self.input_size + self.counts_memory[self.input_size]) * self.prior_y * self.counts_memory[: self.input_size + 1] - kernel**2) * upstream
                 
                 return downstream
             
             return kernel, grad
         
-        kernel = silent_normalization(self.kernel[: self.input_size + 1])
+        kernel = project_gradient(self.kernel[: self.input_size + 1])
         
         c = k.stop_gradient(k.max(h, axis = 1, keepdims = True))
         c = k.stop_gradient(k.maximum(c, self.tau))
@@ -389,9 +375,6 @@ class LogDenseExp(Layer):
     # To support serialization
     def get_config(self):
         config = super(LogDenseExp, self).get_config()
-        #config.update({"number_constraint_iterations" : self.number_constraint_iterations,
-        #               "max_input_size" : self.max_input_size, "output_size" : self.output_size,
-        #               "tau_init" : self.tau_init, "prior_y" : self.prior_y_init})
         config.update({"number_constraint_iterations" : self.number_constraint_iterations,
                        "max_input_size" : self.max_input_size, "output_size" : self.output_size,
                        "tau_init" : self.tau_init, "prior_y" : self.prior_y.value()})
@@ -405,96 +388,16 @@ class LogDenseExp(Layer):
         return cls(**config, prior_y = prior_y)
     
     def compute_output_shape(self, input_shape):
+        '''
+        Compute the output shape of the layer.
+        Parameters
+        ----------
+        input_shape : tuple
+            The shape of the input tensor, which is expected to be of the form
+            (batch_size, input_size).
+        Returns
+        -------
+        tuple
+            The shape of the output tensor.
+        '''
         return (input_shape[0], self.output_size + 1)
-
-### Layer that computes log(correlation(w, x)) using a convolution
-### w and x are 2D with different shapes
-class LogConvCor(Layer):
-
-    def __init__(self, memory_shape, number_memories, memory_strides, w_mean, noise, **kwargs):
-        self.memory_shape = memory_shape
-        self.number_memories = number_memories
-        self.memory_strides = memory_strides
-        self.w_mean = w_mean
-        self.noise = noise
-        super(LogConvCor, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        # Create a trainable weight variable for this layer.
-        self.K = k.cast(k.prod(self.memory_shape) * input_shape[-1], dtype = "float32")
-        
-        self.kernel = self.add_weight(name = "kernel",
-                                      shape = self.memory_shape + (input_shape[-1], self.number_memories),
-                                      initializer = init.ClusteredNormal(self.w_mean, self.noise, 1, axis = (0, 1, 2)),
-                                      trainable = True)
-        self.kernel.norm_order = "two"
-        # Axes occupied by individual feature detectors
-        self.kernel.axis = (0, 1, 2)
-        super(LogConvCor, self).build(input_shape)
-    
-    def call(self, x):
-        x_avg = k.pool2d(k.mean(x, axis = -1, keepdims = True),
-                         self.memory_shape, self.memory_strides, pool_mode = "avg", padding = "same")
-        
-        x_var = self.K * (k.pool2d(k.mean(x**2, axis = -1, keepdims = True),
-                                   self.memory_shape, self.memory_strides, pool_mode = "avg", padding = "same") - x_avg**2)
-        
-        x_is_blank = x_var == 0.
-        
-        h = k.log(tf.where(x_is_blank, 1., k.abs(k.conv2d(x, self.kernel, self.memory_strides, padding = "same")
-                                                 - k.sum(self.kernel, axis = (0, 1, 2), keepdims = True) * x_avg)))
-        
-        h = h - (k.log(k.sum(self.kernel**2, axis = (0, 1, 2), keepdims = True))
-                 + k.log(tf.where(x_is_blank, 1., x_var))) / 2
-        
-        return tf.where(x_is_blank, logzero, h)
-    
-    def get_config(self):
-        base_config = super(LogConvCor, self).get_config()
-        return {**base_config, "memory_shape" : self.memory_shape, "number_memories" : self.number_memories,
-                "memory_strides" : self.memory_strides}
-
-    def compute_output_shape(self, input_shape):
-        return input_shape[: -1] + (self.number_memories,)
-
-### Layer that computes log(dot(v, exp(beta*h)) + tau) using a convolution with 1 x 1 kernels
-### Input and kernel are 2D with different shapes
-class LogConvExp(Layer):
-
-    def __init__(self, output_size, beta, tau, softening, **kwargs):
-        self.output_size = output_size
-        self.beta = beta
-        self.tau = tau
-        self.softening = softening
-        super(LogConvExp, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        # Create a trainable weight variable for this layer.
-        self.kernel = self.add_weight(name = "kernel",
-                                      shape = (input_shape[-1], self.output_size),
-                                      initializer = init.Categorical(self.softening, 1),
-                                      trainable = True)
-        self.kernel.norm_order = "one"
-        
-        super(LogConvExp, self).build(input_shape)
-    
-    def call(self, h):
-        
-        h = self.beta*h
-        
-        c = k.stop_gradient(k.max(h, axis = -1, keepdims = True))
-        c = k.stop_gradient(k.maximum(c, self.tau))
-        
-        return k.log(k.dot(k.exp(h - c), self.kernel) + k.exp(self.tau - c))
-    
-    def get_config(self):
-        base_config = super(LogConvExp, self).get_config()
-        return {**base_config, "output_size" : self.output_size, "beta" : self.beta, "tau" : self.tau}
-
-    def compute_output_shape(self, input_shape):
-        return input_shape[: -1] + (self.output_size,)
-
-### Calculate log(correlation(w, x)) when w and x are numpy arrays
-def log_dense_cor(x, w):
-    return np.log(np.abs(x @ w)) - (np.log(np.sum(w ** 2, axis = 0, keepdims = True))
-                                    + np.log(np.sum(x ** 2, axis = 1, keepdims = True))) / 2

@@ -4,6 +4,7 @@ import numpy as np
 
 from tensorflow.keras import Model, Sequential
 from tensorflow.keras.models import load_model
+# from tensorflow.keras.models import functional
 from tensorflow.keras.layers import Input, Dense, BatchNormalization
 from tensorflow.keras.regularizers import L1L2
 from tensorflow.keras.callbacks import TerminateOnNaN, EarlyStopping
@@ -90,6 +91,7 @@ def init_vanilla_net(softening, number_features, number_units, number_classes,
     
     return model
 
+### Initialize a new DAN model.
 def init_DAN(loss, beta_init, softening, number_features, number_memories, max_number_memories,
              number_classes, number_constraint_iterations, learning_rate, momentum,
              prior_y = None, normalize_online = False):
@@ -104,7 +106,6 @@ def init_DAN(loss, beta_init, softening, number_features, number_memories, max_n
         The initial inverse temperature of the DAN.
     softening : float
         Label softening or smoothing. If None, no softening is applied.
-        Only used if loss is "supervised".
     number_features : int
         The number of features in the input data.
     number_memories : int
@@ -150,7 +151,7 @@ def init_DAN(loss, beta_init, softening, number_features, number_memories, max_n
         model.compile(optimizer, loss = losses.SupervisedNegLogLikelihood(softening),
                       metrics = ["accuracy"])
     elif loss == "unsupervised":
-        model.compile(optimizer, loss = losses.UnsupervisedNegLogLikelihood(),
+        model.compile(optimizer, loss = losses.UnsupervisedNegLogLikelihood(softening),
                       metrics = [])
     else:
         raise ValueError("Loss type not recognized. Supported values are 'supervised' and 'unsupervised'.")
@@ -293,6 +294,7 @@ def compile_splitting_phase(model):
     model.compile(optimizer = model.optimizer, loss = model.loss,
                   metrics = [metrics.RayleighQuotient(model)])
 
+### Train a vanilla neural net
 def train_vanilla_net(x_train, y_train, model, number_epochs, batch_size, verbose = False):
     callback_list = []
     if verbose == True:
@@ -304,6 +306,7 @@ def train_vanilla_net(x_train, y_train, model, number_epochs, batch_size, verbos
     
     return model
 
+### Train a DAN.
 def train_DAN(x_train, y_train, model, number_epochs, number_annealing_epochs,
               batch_size, beta_final = None, slope = 1, patience = 0,
               training_phase = "memorization", record = None, verbose = False,
@@ -443,12 +446,15 @@ def train_DAN(x_train, y_train, model, number_epochs, number_annealing_epochs,
     
     return model
 
+### Save a trained vanilla neural network.
 def save_vanilla_net(model, number_units, name = "vanilla_net"):
     model.save("./Data/Nets/%s_with_%s_hidden_units.keras" % (name, str(number_units)))
 
+### Load a trained vanilla neural network.
 def load_vanilla_net(number_units, name = "vanilla_net"):
     return load_model("./Data/Nets/%s_with_%s_hidden_units.keras" % (name, str(number_units)))
 
+### Save a trained DAN.
 def save_DAN(model, beta, number_memories, number_splits, name = "DAN"):
     '''
     Save a DAN to a file. The parameters other than the model itself are used to name
@@ -470,6 +476,7 @@ def save_DAN(model, beta, number_memories, number_splits, name = "DAN"):
     model.save("./Data/Nets/%s_with_beta=%s_and_%s_memories_for_%s_splits.keras"
                % (name, str(beta), str(number_memories), str(number_splits)))
 
+### load a trained DAN.
 def load_DAN(beta, number_memories, number_splits, custom_objects = custom_objects, name = "DAN"):
     '''
     Load a DAN from a file. The parameters other than custom_objects are used to find

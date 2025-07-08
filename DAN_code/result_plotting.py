@@ -1,5 +1,4 @@
 import numpy as np
-import tensorflow as tf
 
 import DAN_code.functions as func
 import DAN_code.normalization as norm
@@ -11,14 +10,30 @@ import cmasher as cmr
 import seaborn as sns
 
 import string
-from datetime import datetime
 uppercase_array = np.array(list(string.ascii_uppercase), dtype = "str")
 
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["mathtext.fontset"] = "dejavuserif"
 
 def truncate_colormap(cmap, minval = 0, maxval = 1, n = 256):
-    
+    '''
+    Truncate a colormap to the range [minval, maxval] and return the result.
+
+    Parameters
+    ----------
+    cmap : matplotlib.colors.Colormap
+        The colormap to truncate.
+    minval : float, optional
+        The minimum value of the colormap range. Defaults to 0.
+    maxval : float, optional
+        The maximum value of the colormap range. Defaults to 1.
+    n : int, optional
+        The number of colors in the truncated colormap. Defaults to 256.
+    Returns
+    -------
+    new_cmap : matplotlib.colors.Colormap
+        The truncated colormap.
+    '''
     new_cmap = LinearSegmentedColormap.from_list(
         "trunc({n},{a:.2f},{b:.2f})".format(n = cmap.name, a = minval, b = maxval),
         cmap(np.linspace(minval, maxval, n, endpoint = True)))
@@ -40,18 +55,54 @@ def classes_and_confidences(x, model):
     
     return p_hard, p_soft
 
-### Show image data or first layer weights.
-def plot_images(images, dimensions = None, animated = False, title = None, labeled = True, filename = None, fignum = None):
+def plot_images(images, dimensions = None, animated = False, title = None, labeled = True, filename = None, fignum = None, fontsize = 10):
+    '''
+    Plot images in a grid. The images are reshaped to fit the grid dimensions.
+    If the images do not fill all the squares of the grid, it is padded with zeros.
+    If the images are given as 1D arrays, they are reshaped to 2D before plotting.
+
+    Parameters
+    ----------
+    images : np.ndarray
+        The images to plot. Can be 1D for a single image given as a 1D array, 2D for multiple
+        images given as 1D arrays, or 3D/4D for multiple images with height and width.
+        In the latter case, the last two dimensions are interpreted as the height and width
+        of the images, while the other dimensions are interpreted as containing the
+        different images.
+    dimensions : tuple, optional
+        The dimensions of the grid to plot the images. If not provided, the grid is
+        inferred from the number of images. Defaults to None.
+    animated : bool, optional
+        If True, gives the option to use the plotted weights in an animation.
+        Otherwise, plots the images in a static figure. Defaults to False.
+    title : str, optional
+        Optional plot title. Defaults to None for no title.
+    labeled : bool, optional
+        Whether to label the columns and rows of the grid with letters from A to Z.
+        Defaults to True.
+    filename : str, optional
+        If provided, saves the plot to a file with the given filename.
+        Defaults to None for no file saving.
+    fignum : int, optional
+        The figure number to plot the images on. If None, a new figure is created.
+        Defaults to None.
+    fontsize : int, optional
+        The font size of the labels, the ticks and the optional title. Defaults to 10.
+    Returns
+    -------
+    height : int
+        The height of the grid in number of images. Returned iff animated is False.
+    width : int
+        The width of the grid in number of images. Returned iff animated is False.
+    image : matplotlib.image.AxesImage
+        The image object containing the plotted images. Returned iff animated is True.
+    '''
     if images.ndim == 1:
         images = images[np.newaxis]
     
-    # Use animated = False to use the plotted weights in an animation.
     if animated and (fignum is None):
-        # The image is put onto the current figure if animated.
+        # The image is put onto the current figure if animated
         fignum = 0
-    # else:
-        # A new figure is created if not animated.
-        # fignum = None
     
     sqrt_size = int(images.shape[-1]**(1/2))
     if images.ndim == 2 and images.shape[-1] == sqrt_size**2:
@@ -97,10 +148,10 @@ def plot_images(images, dimensions = None, animated = False, title = None, label
         plt.tick_params(bottom = False, right = False, labelbottom = False, labelright = False)
         
         plt.xticks(ticks = np.arange(0.5 * image_width - 0.5, image_width * (width + 0.5) - 0.5, image_width),
-                   labels = uppercase_array[np.arange(width).astype("int") % 26])
+                   labels = uppercase_array[np.arange(width).astype("int") % 26], fontsize = fontsize)
         
         plt.yticks(ticks = np.arange(0.5 * image_height - 0.5, image_height * (height + 0.5) - 0.5, image_height),
-                   labels = uppercase_array[np.arange(height).astype("int") % 26])
+                   labels = uppercase_array[np.arange(height).astype("int") % 26], fontsize = fontsize)
     else:
         plt.tick_params(top = False, bottom = False, left = False, right = False,
                         labeltop = False, labelbottom = False,  labelleft = False, labelright = False)
@@ -118,10 +169,11 @@ def plot_images(images, dimensions = None, animated = False, title = None, label
     else:
         # Add an optional title
         if title is not None:
-            plt.title(title)
+            plt.title(title, fontsize = fontsize)
         
         if labeled:
-            plt.colorbar(ticks = [-cap, 0, cap], shrink = 0.8, aspect = 20*0.8)
+            cbar = plt.colorbar(ticks = [-cap, 0, cap], shrink = 0.8, aspect = 20*0.8)
+            cbar.ax.tick_params(labelsize = fontsize)
         
         if filename is not None:
             plt.savefig("./Data/Figures/%s.png" % filename)
@@ -131,15 +183,48 @@ def plot_images(images, dimensions = None, animated = False, title = None, label
         
         return height, width
 
-### Plot label-like data or second layer weights.
-def plot_labels(predictions, labels, dimensions = None, animated = False, labeled = True, filename = None, fignum = None):
-    # Use animated = False to use the plotted weights in an animation.
+def plot_labels(predictions, labels, dimensions = None, animated = False, labeled = True, filename = None, fignum = None, fontsize = 10):
+    '''
+    Plot soft label-like data corresponding to known images. For example,
+    plot the predicted probabilities of a neural network on test images, the true labels
+    of an image dataset, or the class weights of a DAN. We use this function to plot
+    the class weights in our paper.
+
+    Parameters
+    ----------
+    predictions : np.ndarray
+        The classes predicted by a neural network fed with the known images. Must be 1D
+        and consist of integers. When we use this function to plot the class weights of a DAN,
+        we use the predictions of the DAN on its memories.
+    labels : np.ndarray
+        The label-like data to plot. Must be 2D, where the first dimension corresponds to the
+        classes and the second dimension corresponds to the images.
+    dimensions : tuple, optional
+        The dimensions of the grid in which the known images were plotted. If not provided, the grid is
+        inferred from the shape of the predictions. Defaults to None.
+    animated : bool, optional
+        If True, gives the option to use the plotted labels in an animation.
+        Otherwise, plots the labels in a static figure. Defaults to False.
+    labeled : bool, optional
+        Whether to label the columns of the label-like data with tuples of letters from A to Z
+        corresponding to the columns and rows of an image grid plotted for the known images
+        using plot_images. Defaults to True.
+    filename : str, optional
+        If provided, saves the plot to a file with the given filename.
+        Defaults to None for no file saving.
+    fignum : int, optional
+        The figure number to plot the labels on. If None, a new figure is created.
+        Defaults to None.
+    fontsize : int, optional
+        The font size of the labels and ticks. Defaults to 10.
+    Returns
+    -------
+    image : matplotlib.image.AxesImage
+        The image object containing the plotted labels. Returned iff animated is True.
+    '''
     if animated & (fignum is None):
-        # The image is put onto the current figure if animated.
+        # The image is put onto the current figure if animated
         fignum = 0
-    # else:
-        # A new figure is created if not animated.
-        # fignum = None
     
     # Infer image dimensions if not provided
     number_images = predictions.shape[0]
@@ -150,10 +235,6 @@ def plot_labels(predictions, labels, dimensions = None, animated = False, labele
         height = dimensions[0]
         width = dimensions[1]
     
-    # if model.loss.supervised and not animated:
-        # pass
-        # predictions = classes_and_confidences(images, model)
-    
     cap = norm.array_max_norm(labels, keepdims = False)
     
     image = plt.matshow(labels, fignum = fignum, cmap = cold, vmin = 0, vmax = cap, animated = animated)
@@ -161,10 +242,10 @@ def plot_labels(predictions, labels, dimensions = None, animated = False, labele
                linestyles = "dashed", linewidths = 1)
     
     if labeled:
-        plt.xlabel("Memory")
-        plt.ylabel("Class")
+        plt.xlabel("Memory", fontsize = fontsize)
+        plt.ylabel("Class", fontsize = fontsize)
         
-        tick_locations, tick_labels = plt.yticks(np.arange(labels.shape[0] - 1))
+        tick_locations, tick_labels = plt.yticks(np.arange(labels.shape[0] - 1), fontsize = fontsize)
         
         height_labels = np.arange(height).astype("int")
         width_labels = np.arange(width).astype("int")
@@ -175,7 +256,7 @@ def plot_labels(predictions, labels, dimensions = None, animated = False, labele
         memory_indices = np.array(np.meshgrid(height_labels, width_labels)).reshape(2, -1)
         memory_indices = np.char.add(memory_indices[1], memory_indices[0])
         
-        plt.xticks(np.arange(labels.shape[1])[: number_images], labels = memory_indices[: number_images], rotation = 45)
+        plt.xticks(np.arange(labels.shape[1])[: number_images], labels = memory_indices[: number_images], rotation = 45, fontsize = fontsize)
         
         main_axis = plt.gca()
         
@@ -184,15 +265,10 @@ def plot_labels(predictions, labels, dimensions = None, animated = False, labele
         secondary_axis = main_axis.secondary_xaxis("top")
         
         secondary_axis.set_xticks(np.arange(labels.shape[1])[: number_images])
-        secondary_axis.set_xticklabels(predictions.astype("int8"))
+        secondary_axis.set_xticklabels(predictions.astype("int8"), fontsize = fontsize)
     else:
         plt.tick_params(top = False, bottom = False, left = False, right = False,
                         labeltop = False, labelbottom = False,  labelleft = False, labelright = False)
-    
-    # if model.loss.supervised and not animated:
-        # secondary_axis.set_xticklabels(predictions[0].astype("int8"))
-    # else:
-        # secondary_axis.set_xticklabels([])
     
     if animated:
         return image
@@ -252,6 +328,139 @@ def plot_activations(activations, w = None, g = None, dimensions = None, title =
         axis = base_fig.add_axes([left, bottom, width, height])
         plot_images(w, fignum = 0)
     
+    plt.show()
+
+def plot_accuracy_and_runtime(beta, number_memories_range, number_splits_range, fontsize = 13):
+    '''
+    Plot the accuracy and run time of DANs trained with and without splitting as a function
+    of the maximum number of memories. Assume that the accuracy and training time data
+    is stored in Data/Performance with file names of the form
+    DAN_accuracy_and_run_time_with_beta={beta}_and_{number_memories}_memories_for_{number_splits}_splits.npy,
+    where beta and number_memories are the inverse temperature and maximum number of memories
+    of the corresponding DANs, respectively, and number_splits is the number of splits of the DANs
+    trainined with splitting steepest descent.
+
+    Parameters
+    ----------
+    beta : float
+        The inverse temperature of the DANs whose accuracy and run time to plot.
+    number_memories_range : list of int
+        The range of maximum number of memories for which to plot the accuracy and run time
+        of the DANs.
+    number_splits_range : list of int
+        The range of number of splits for which to plot the accuracy and run time of the DANs
+        trained with splitting steepest descent. DANs trained without splitting have
+        number_splits = 0. This list must have the same length as number_memories_range.
+    fontsize : int, optional
+        The font size of labels and ticks. Defaults to 13.
+    '''
+    run_time_with_splits = []
+    accuracy_with_splits = []
+    run_time_without_splits = []
+    accuracy_without_splits = []
+    for number_memories, number_splits in zip(number_memories_range, number_splits_range):
+        with open("./Data/Performance/DAN_accuracy_and_run_time_with_beta=%s_and_%s_memories_for_%s_splits.npy"
+                % (str(beta), str(number_memories), str(number_splits)), "rb") as f:
+            run_time = np.load(f)
+            accuracy = np.load(f)
+        
+        run_time_with_splits.append(run_time)
+        accuracy_with_splits.append(accuracy)
+        
+        with open("./Data/Performance/DAN_accuracy_and_run_time_with_beta=%s_and_%s_memories_for_%s_splits.npy"
+                % (str(beta), str(number_memories), str(0)), "rb") as f:
+            run_time = np.load(f)
+            accuracy = np.load(f)
+        
+        run_time_without_splits.append(run_time)
+        accuracy_without_splits.append(accuracy)
+
+    scaling_factor = np.mean(run_time_with_splits[-1])
+
+    run_time_with_splits = np.array(run_time_with_splits / scaling_factor)
+    accuracy_with_splits = np.array(accuracy_with_splits)
+
+    mean_run_time_with_splits = np.mean(run_time_with_splits, axis = 1)
+    std_run_time_with_splits = np.std(run_time_with_splits, axis = 1)
+    mean_accuracy_with_splits = np.mean(accuracy_with_splits, axis = 1)
+    std_accuracy_with_splits = np.std(accuracy_with_splits, axis = 1)
+
+    run_time_without_splits = np.array(run_time_without_splits / scaling_factor)
+    accuracy_without_splits = np.array(accuracy_without_splits)
+
+    mean_run_time_without_splits = np.mean(run_time_without_splits, axis = 1)
+    std_run_time_without_splits = np.std(run_time_without_splits, axis = 1)
+    mean_accuracy_without_splits = np.mean(accuracy_without_splits, axis = 1)
+    std_accuracy_without_splits = np.std(accuracy_without_splits, axis = 1)
+
+    fig, axes = plt.subplots(1, 2, sharex = True, figsize = (8, 4))
+    fig_axis = fig.add_subplot(111, frameon = False)
+    plt.tick_params(labelcolor = "none", which = "both", top = False, bottom = False, left = False, right = False)
+
+    axes[0].errorbar(number_memories_range, mean_accuracy_with_splits, std_accuracy_with_splits,
+                    marker = "o", linestyle = "--", capsize = 2, zorder = 2.5, color = "C0",
+                    markersize = 4, label = "Splitting")
+    axes[0].errorbar(number_memories_range, mean_accuracy_without_splits, std_accuracy_without_splits,
+                    marker = "o", linestyle = "--", capsize = 2, zorder = 1.5, color = "C1",
+                    markersize = 4, label = "No splitting")
+    axes[0].legend(fontsize = fontsize)
+    axes[0].set_xticks(number_memories_range)
+    axes[0].set_ylabel(r"Accuracy", fontsize = fontsize)
+    axes[0].tick_params(axis = "both", which = "both", labelsize = fontsize)
+
+    axes[1].errorbar(number_memories_range, mean_run_time_with_splits, std_run_time_with_splits,
+                    marker = "o", linestyle = "--", capsize = 2, zorder = 2.5, color = "C0", markersize = 4)
+    axes[1].errorbar(number_memories_range, mean_run_time_without_splits, std_run_time_without_splits,
+                    marker = "o", linestyle = "--", capsize = 2, zorder = 1.5, color = "C1", markersize = 4)
+    axes[1].set_xticks(number_memories_range)
+    axes[1].yaxis.tick_right()
+    axes[1].yaxis.set_label_position("right")
+    axes[1].set_ylabel(r"Training time", fontsize = fontsize, rotation = -90, labelpad = 17)
+    axes[1].tick_params(axis = "both", which = "both", labelsize = fontsize)
+    axes[1].annotate(r"$t = 1$", (2000, 1), (1775, 1.25), fontsize = fontsize,
+                    arrowprops = {"width" : 2, "headwidth" : 8, "headlength" : 8,
+                                "shrink" : 1, "color" : "black"})
+
+    fig_axis.set_xlabel(r"Max number memories $P_{\mathrm{max}}$", fontsize = fontsize)
+    plt.show()
+
+    fig, axes = plt.subplots(1, 2, sharex = True, figsize = (8, 4))
+    fig_axis = fig.add_subplot(111, frameon = False)
+    plt.tick_params(labelcolor = "none", which = "both", top = False, bottom = False, left = False, right = False)
+
+    axes[0].plot(number_memories_range, mean_accuracy_with_splits,
+                marker = "none", linestyle = "--", zorder = 2.5, color = "C0",
+                label = "Splitting")
+    axes[0].plot(number_memories_range, mean_accuracy_without_splits,
+                marker = "none", linestyle = "--", zorder = 1.5, color = "C1",
+                label = "No splitting")
+
+    axes[0].plot(number_memories_range, accuracy_with_splits, marker = "o",
+                markersize = 2, linestyle = "none", zorder = 2.5, color = "C0")
+    axes[0].plot(number_memories_range, accuracy_without_splits,
+                markersize = 2, marker = "o", linestyle = "none", zorder = 1.5, color = "C1")
+
+    axes[0].legend(fontsize = fontsize)
+    axes[0].set_xticks(number_memories_range)
+    axes[0].set_ylabel(r"Accuracy", fontsize = fontsize)
+    axes[0].tick_params(axis = "both", which = "both", labelsize = fontsize)
+
+    axes[1].plot(number_memories_range, mean_run_time_with_splits,
+                marker = "none", linestyle = "--", zorder = 2.5, color = "C0")
+    axes[1].plot(number_memories_range, mean_run_time_without_splits,
+                marker = "none", linestyle = "--", zorder = 1.5, color = "C1")
+
+    axes[1].plot(number_memories_range, run_time_with_splits,
+                marker = "o", markersize = 2, linestyle = "none", zorder = 2.5, color = "C0")
+    axes[1].plot(number_memories_range, run_time_without_splits,
+                marker = "o", markersize = 2, linestyle = "none", zorder = 1.5, color = "C1")
+    axes[1].set_xticks(number_memories_range)
+    axes[1].yaxis.tick_right()
+    axes[1].yaxis.set_label_position("right")
+    axes[1].set_ylabel(r"Training time", fontsize = fontsize, rotation = -90, labelpad = 17)
+    axes[1].tick_params(axis = "both", which = "both", labelsize = fontsize)
+
+    fig_axis.set_xlabel(r"Max number memories $P_{\mathrm{max}}$", fontsize = fontsize)
     plt.show()
 
 def plot_linear_decomposition(x_true, x_init, w_mean_given_target, w_mean, x_res, x_init_coef, w_mean_given_target_coef, w_mean_coef, x_res_coef, dimensions = None, title = None):
@@ -348,7 +557,19 @@ def PCA_plot(model, x_train, x_test, y_test, number_classes):
 
 ### Animate lists of weights returned by WeightEvolution.
 def animate(w_list, g_list, model):
-    
+    '''
+    Create an animation of the evolution of DAN memories and class weights during training.
+
+    Parameters
+    ----------
+    w_list : list of np.ndarray
+        A list of DAN memories at different training steps.
+    g_list : list of np.ndarray
+        A list of DAN class weights at different training steps.
+    model : keras.Model
+        The trained DAN model used to predict the hard class labels of the memories,
+        which are used as the predictions argument of plot_labels.
+    '''
     w_fig = plt.figure()
     w_images = []
     for w in w_list:

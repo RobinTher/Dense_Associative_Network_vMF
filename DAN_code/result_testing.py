@@ -10,9 +10,23 @@ import matplotlib.pyplot as plt
 
 import DAN_code.result_plotting as res_plot
 
-### Sort prototypes by recognized classes and plot
-def sort_prototypes(model, number_memories):
-    
+def sort_memories(model, number_memories, dimension = 5, fontsize = 10):
+    '''
+    Sort the memories of a DAN by the classes that they are recognized as
+    and plot them. Also plot the corresponding class weights.
+
+    Parameters
+    ----------
+    model : DAN_code.models.DAN
+        The DAN model containing the memories.
+    number_memories : int
+        The number of memories to sort and plot. If the number of memories in the model
+        is less than or equal to this number, all memories will be sorted and plotted.
+    dimension : int, optional
+        The number of images to plot across in x and y. Defaults to 5.
+    fontsize : int, optional
+        The font size of the labels and ticks. Defaults to 10.
+    '''
     w = model.get_DAN_layer(1).get_weights()[0].T
     g = model.get_DAN_layer(2).get_weights()[0]
     
@@ -23,9 +37,10 @@ def sort_prototypes(model, number_memories):
     g_sorted = g[j_sorted]
     
     # Plot samples
-    for j in range(number_memories // 25):
-        res_plot.plot_images(w_sorted[25 * j : 25 * (j + 1)])
-        res_plot.plot_labels(y_sorted[25 * j : 25 * (j + 1)], g_sorted[25 * j : 25 * (j + 1)].T)
+    area = dimension**2
+    for j in range(number_memories // area):
+        res_plot.plot_images(w_sorted[area * j : area * (j + 1)], fontsize = fontsize)
+        res_plot.plot_labels(y_sorted[area * j : area * (j + 1)], g_sorted[area * j : area * (j + 1)].T, fontsize = fontsize)
 
 ### Plot the memories which are the most activated by each image in x_test and print their classes
 def top_activated_memories(x_test, model, x_init = None):
@@ -34,7 +49,7 @@ def top_activated_memories(x_test, model, x_init = None):
     g = model.get_DAN_layer(2).get_weights()[0]
     
     y_pred = np.argmax(model.predict(x_test), axis = -1)
-    y_1NN, y_2NN = first_neighbor(x_test, w, g)
+    y_1NN = first_neighbor(x_test, w, g)
     
     beta = model.get_DAN_layer(1).beta
     tau = model.get_DAN_layer(2).tau
@@ -136,22 +151,6 @@ def linear_decomposition(x_final, x_init, y_target, model, softening):
         
         res_plot.plot_activations(prob_memory_top, w_top, g_top)
 
-def weighted_median(values, weights, quantile = 1/2):
-    
-    indices = np.argsort(values, axis = -1)
-    
-    values = np.take_along_axis(values, indices, axis = -1)
-    weights = np.take_along_axis(weights, indices, axis = -1)
-    
-    cum_weights = np.cumsum(weights, axis = -1)
-    
-    #indices = np.array([np.searchsorted(cum_weight, quantile * cum_weight[-1]) for cum_weight in cum_weights])
-    #
-    #return indices, np.array([value[index] for value, index in zip(values, indices)])
-    
-    return np.array([value[np.searchsorted(cum_weight, quantile * cum_weight[-1])] for value, cum_weight
-                     in zip(values, cum_weights)])
-
 def generate_and_plot_data(x_init, y_target, model, softening, learning_rate, momentum, number_epochs):
     
     inverse_model = InverseModel(model, softening)
@@ -172,49 +171,49 @@ def generate_and_plot_data(x_init, y_target, model, softening, learning_rate, mo
     
     return x_final
 
-### Attack all digits fed to the models and plot the accuracy as a function of the attack magnitude
-# def fool_all(x_test, y_test, models):
-    
-    # for model in models:
-        # Set up foolbox
-        # epsilons = np.linspace(0, 1, num = 11)
-        # attack = foolbox.attacks.LinfProjectedGradientDescentAttack()
-        # fmodel = foolbox.models.TensorFlowModel(model, bounds = (0, 1), preprocessing = None)
-        
-        # x_clean = tf.convert_to_tensor(x_test)
-        # y_clean = tf.convert_to_tensor(np.argmax(y_test, axis = 1))
-        
-        # criterion = foolbox.criteria.Misclassification(y_clean)
-        
-        # x_raw, x_adv, is_adv = attack(fmodel, x_clean, criterion = criterion, epsilons = epsilons)
-    
-        # plt.plot(epsilons, 1 - is_adv.numpy().mean(axis = -1), label = r"$\beta = $" + str(model.layers[-1].beta))
-        # plt.legend()
-        # plt.xlabel("Magnitude of adversarial perturbations")
-        # plt.ylabel("Accuracy of the network")
-    
-    # plt.show()
-
 def first_neighbor(x, w, g):
-    
+    '''
+    First nearest neighbor classifier approximation of the DAN model.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Some input data.
+    w : np.ndarray
+        The memories of the DAN.
+    g : np.ndarray
+        The class weights of the DAN.
+    Returns
+    -------
+    y_1NN : np.ndarray
+        The predicted classes of the input data.
+    '''
     h = func.dense_cor(x - np.mean(x, axis = 1, keepdims = True), w)
-    
     y_1NN = np.argmax(g[np.argmax(h, axis = 1)], axis = 1)
-    
-    h[:, np.argmax(h, axis = 1)] = 0
-    
-    y_2NN = np.argmax(g[np.argmax(h, axis = 1)], axis = 1)
-    
-    return y_1NN, y_2NN
-    # return np.argmax(g[np.argmax(h, axis = 1)], axis = 1)
+
+    return y_1NN
 
 def first_neighbor_fidelity(x_test, y_hard, y_pred, w, g):
-    y_1NN, y_2NN = first_neighbor(x_test, w, g)
+    '''
+    Calculate how faithful the first nearest neighbor classifier approximation is.
+
+    Parameters
+    ----------
+    x_test : np.ndarray
+        The test data.
+    y_hard : np.ndarray
+        The hard labels of the test data.
+    y_pred : np.ndarray
+        The predicted labels of the test data.
+    w : np.ndarray
+        The memories of the DAN.
+    g : np.ndarray
+        The class weights of the DAN.
+    '''
+    y_1NN = first_neighbor(x_test, w, g)
     
     print("1NN score: " + str(np.mean(y_1NN == y_hard)))
     print("1NN fidelity: " + str(np.mean(y_1NN == y_pred)))
-    
-    print("Residual 2NN fidelity: " + str(np.mean(y_2NN[y_1NN != y_pred] == y_pred[y_1NN != y_pred])))
     
     idx_pass = y_pred == y_hard
     idx_fail = ~idx_pass

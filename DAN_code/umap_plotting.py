@@ -2,8 +2,27 @@ import numpy as np
 import umap
 import DAN_code.functions as func
 
-### May need a different environment to make it work!
+import matplotlib.pyplot as plt
+
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["mathtext.fontset"] = "dejavuserif"
+
 def plot_umap(x_test, beta, name, file_suffix):
+    '''
+    Plots the UMAP embedding of the overlaps of the test data with weights saved using
+    DAN_code.callbacks.WeightEvolution.
+
+    Parameters
+    ----------
+    x_test : np.ndarray
+        The test data.
+    beta : float
+        The inverse temperature of the DAN, used to load the correct weights.
+    name : str
+        The name of the model, used to load the correct weights.
+    file_suffix : str
+        A file suffix used to load the correct weights. 
+    '''
     x_test = x_test[400:2300:5]
     w = np.array([])
     g = np.array([])
@@ -25,8 +44,6 @@ def plot_umap(x_test, beta, name, file_suffix):
                 break
     
     w = w.T
-    #w = w.reshape(-1, x_test.shape[-1]).T
-    #g = g.flatten()
     overlaps = func.dense_cor(x_test - np.mean(x_test, axis = 1, keepdims = True), w)
 
     reducer = umap.UMAP(n_components = 2, n_neighbors = 1000, verbose = True, low_memory = False)
