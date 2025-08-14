@@ -3,8 +3,10 @@ import tensorflow as tf
 from tensorflow.keras.saving import deserialize_keras_object
 
 from tensorflow.keras.constraints import Constraint
+from tensorflow.keras.regularizers import Regularizer
 
 import DAN_code.normalization as norm
+import DAN_code.functions as func
 
 class UnitTwoNorm(Constraint):
     '''
@@ -20,6 +22,7 @@ class UnitTwoNorm(Constraint):
     def __init__(self, output_size):
         self.output_size = output_size
         self.axis = 0
+        #self.beta_sign = tf.constant(1., dtype = "float32")
     
     def __call__(self, w):
         '''

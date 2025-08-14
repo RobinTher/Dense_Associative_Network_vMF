@@ -1,15 +1,98 @@
 from tensorflow.keras import backend as k
 import tensorflow as tf
 import numpy as np
+from functools import partial
 
 from tensorflow.keras.layers import Layer
 from tensorflow.keras.initializers import Constant, Orthogonal
+from tensorflow.keras.regularizers import L1
 from tensorflow.keras.saving import deserialize_keras_object
 
 import DAN_code.initializers as init
 import DAN_code.constraints as constr
 import DAN_code.normalization as norm
 import DAN_code.functions as func
+
+@tf.custom_gradient
+def project_basis_gradient(kernel):
+    def grad(upstream):
+        #reg = k.dot(kernel, tf.transpose(upstream))
+        #downstream = upstream - k.dot(kernel, (reg + tf.transpose(reg))/2)
+        downstream = upstream - k.dot(k.dot(kernel, tf.transpose(upstream)), kernel)
+        return downstream
+    
+    return kernel, grad
+
+@tf.custom_gradient
+def project_memory_gradient(kernel):
+    '''
+    Project the gradient with respect to the input kernel onto its orthogonal complement,
+    also known as the tangent space (see Appendix F).
+    
+    Parameters
+    ----------
+    kernel : tf.Tensor
+        The kernel whose gradient is to be projected.
+    Returns
+    -------
+    kernel : tf.Tensor
+        The input kernel.
+    grad : function
+        A function that projects the gradient with respect to the input kernel
+        onto its orthogonal complement.
+    '''
+    def grad(upstream):
+        downstream = upstream - k.sum(upstream * kernel, axis = 0) * kernel
+        return downstream
+    
+    return kernel, grad
+
+@tf.custom_gradient
+def stop_activation(activation):
+    '''
+    Multiply the input activation by zero and return a custom gradient function
+    that returns the upstream gradient unchanged
+    Parameters
+    ----------
+    activation : tf.Tensor
+        The input activation to be multiplied by zero.
+    Returns
+    -------
+    activation : tf.Tensor
+        The input activation multiplied by zero.
+    grad : function
+        A function that returns the upstream gradient unchanged.
+    '''
+    def grad(stream):
+        return stream
+    
+    return 0 * activation, grad
+
+@tf.custom_gradient
+def project_weigh_gradient(kernel, counts_memory):
+    '''
+    Approximately project the gradient with respect to the input kernel onto
+    its orthogonal complement, also known as the tangent space (see Appendix F).
+    
+    Parameters
+    ----------
+    kernel : tf.Tensor
+        The kernel whose gradient is to be projected.
+    Returns
+    -------
+    kernel : tf.Tensor
+        The input kernel.
+    grad : function
+        A function that projects the gradient with respect to the input kernel
+        onto its orthogonal complement.
+    '''
+    def grad(upstream):
+        
+        downstream = upstream - k.sum(upstream * kernel, axis = 1, keepdims = True) / counts_memory
+        
+        return downstream, None
+    
+    return kernel, grad
 
 class Normalize(Layer):
     '''
@@ -70,15 +153,18 @@ class DenseCor(Layer):
         hidden units are built during training using splitting steepest descent.
     beta_init : float
         The initial value of the inverse temperature beta, used to scale the output.
+    beta_reg : float
+        The regularization on beta, represented with the character varsigma (ς) in the paper.
+    
     '''
-    def __init__(self, output_size, max_output_size, beta_init, **kwargs):
+    def __init__(self, output_size, max_output_size, beta_init, beta_reg, **kwargs):
         super(DenseCor, self).__init__(**kwargs)
         
         self.output_size = output_size
-
         self.max_output_size = max_output_size
         
         self.beta_init = beta_init
+        self.beta_reg = beta_reg
     
     def build(self, input_shape):
         '''
@@ -104,9 +190,9 @@ class DenseCor(Layer):
                                        constraint = constr.UnitTwoNorm(self.output_size),
                                        trainable = True)
         
-        self.beta = self.add_weight(name = "beta", shape = (),
+        self.beta = self.add_weight(name = "beta", shape = (1,),
                                     initializer = Constant(self.beta_init),
-                                    trainable = False)
+                                    trainable = True)
     
     def call(self, x):
         '''
@@ -126,66 +212,23 @@ class DenseCor(Layer):
             Dot product between the data layer and the DAN memories,
             scaled by the inverse temperature beta.
         '''
-        @tf.custom_gradient
-        def project_gradient(kernel):
-            '''
-            Project the gradient with respect to the input kernel onto its orthogonal complement,
-            also known as the tangent space (see Appendix F).
-            
-            Parameters
-            ----------
-            kernel : tf.Tensor
-                The kernel whose gradient is to be projected.
-            Returns
-            -------
-            kernel : tf.Tensor
-                The input kernel.
-            grad : function
-                A function that projects the gradient with respect to the input kernel
-                onto its orthogonal complement.
-            '''
-            def grad(upstream):
-                downstream = upstream - k.sum(upstream * kernel, axis = 0) * kernel
-                return downstream
-            
-            return kernel, grad
-        
-        @tf.custom_gradient
-        def stop_activation(activation):
-            '''
-            Multiply the input activation by zero and return a custom gradient function
-            that returns the upstream gradient unchanged.
-
-            Parameters
-            ----------
-            activation : tf.Tensor
-                The input activation to be multiplied by zero.
-            Returns
-            -------
-            activation : tf.Tensor
-                The input activation multiplied by zero.
-            grad : function
-                A function that returns the upstream gradient unchanged.
-            '''
-            def grad(stream):
-                return stream
-            
-            return 0 * activation, grad
-        
-        kernel = project_gradient(self.kernel[:, : self.output_size])
+        kernel = project_memory_gradient(self.kernel[:, : self.output_size])
         eigvecs = self.eigvecs[:, : self.output_size]
+        if self.beta_reg is None:
+            beta_reg = 1.
+        else:
+            beta_reg = self.beta_reg
         
-        h = k.dot(x, kernel)
+        m = k.dot(x, kernel)
+        q = stop_activation(func.unaveraged_rayleigh_quotient(beta_reg*k.stop_gradient(self.beta), k.stop_gradient(m), k.stop_gradient(x), k.stop_gradient(kernel), eigvecs))
         
-        q = stop_activation(func.unaveraged_rayleigh_quotient(self.beta, k.stop_gradient(h), x, k.stop_gradient(kernel), eigvecs))
-        
-        return self.beta * h + tf.math.log1p(q)
+        return beta_reg*self.beta * m - func.tensor_log_gamma_ratio(self.beta, x.shape[1]) + tf.math.log1p(q)
     
     # To support serialization
     def get_config(self):
         config = super(DenseCor, self).get_config()
         config.update({"output_size" : self.output_size, "max_output_size" : self.max_output_size,
-                       "beta_init" : self.beta_init})
+                       "beta_init" : self.beta_init, "beta_reg" : self.beta_reg})
         return config
     
     def compute_output_shape(self, input_shape):
@@ -203,46 +246,68 @@ class DenseCor(Layer):
         '''
         return (input_shape[0], self.output_size)
 
-class DenseOrth(Layer):
+class DenseLowRankCor(Layer):
     
-    def __init__(self, max_input_size, output_size, max_output_size, **kwargs):
-        super(DenseOrth, self).__init__(**kwargs)
+    def __init__(self, latent_size, output_size, max_output_size, beta_init, beta_reg, **kwargs):
+        super(DenseLowRankCor, self).__init__(**kwargs)
         
-        self.max_input_size = max_input_size
-        
+        self.latent_size = latent_size
+
         self.output_size = output_size
 
         self.max_output_size = max_output_size
+
+        self.beta_init = beta_init
+        self.beta_reg = beta_reg
     
     def build(self, input_shape):
         self.input_size = input_shape[1]
+        
         # Create a trainable weight variable for this layer.
-        # Try w = q c
-        self.kernel = self.add_weight(name = "basis_kernel",
-                                      shape = (self.max_input_size, self.max_output_size),
-                                      initializer = Orthogonal(),
-                                      #constraint = constr.Orthogonal(self.input_size, self.output_size),
+        self.basis = self.add_weight(name = "basis_kernel",
+                                     shape = (input_shape[1], self.latent_size),
+                                     initializer = Orthogonal(),
+                                     trainable = True)
+        
+        self.kernel = self.add_weight(name = "memory_kernel",
+                                      shape = (self.latent_size, self.max_output_size),
+                                      initializer = init.RandomSpherical(self.output_size),
+                                      constraint = constr.UnitTwoNorm(self.output_size),
+                                      #regularizer = L1(0.001/self.latent_size**(1/2)),
                                       trainable = True)
+        
+        self.eigvecs = self.add_weight(name = "eigvec_kernel",
+                                       shape = (self.latent_size, self.max_output_size),
+                                       initializer = init.RandomSpherical(self.output_size),
+                                       constraint = constr.UnitTwoNorm(self.output_size),
+                                       trainable = True)
+        
+        self.beta = self.add_weight(name = "beta", shape = (1,),
+                                    initializer = Constant(self.beta_init),
+                                    trainable = True)
         
     def call(self, x):
         
-        @tf.custom_gradient
-        def project_gradient(kernel):
-            def grad(upstream):
-                reg = k.dot(kernel, tf.transpose(upstream))
-                downstream = upstream - k.dot(kernel, (reg + tf.transpose(reg))/2)
-                return downstream
-            
-            return kernel, grad
+        basis = project_basis_gradient(self.basis)
+        kernel = project_memory_gradient(self.kernel[:, : self.output_size])
+        eigvecs = self.eigvecs[:, : self.output_size]
+        if self.beta_reg is None:
+            beta_reg = 1.
+        else:
+            beta_reg = self.beta_reg
         
-        kernel = project_gradient(self.kernel[: self.input_size, : self.output_size])
-        
-        return k.dot(x, kernel)
+        x_latent = k.dot(x, basis)
+        m = k.dot(x_latent, kernel)
+        q = stop_activation(func.unaveraged_rayleigh_quotient(beta_reg*k.stop_gradient(self.beta), k.stop_gradient(m), k.stop_gradient(x_latent), k.stop_gradient(kernel), eigvecs))
+
+        return beta_reg*self.beta * m - func.tensor_log_gamma_ratio(self.beta, x.shape[1]) + tf.math.log1p(q)
     
     # To support serialization
     def get_config(self):
-        config = super(DenseOrth, self).get_config()
-        config.update({"output_size" : self.output_size, "max_output_size" : self.max_output_size})
+        config = super(DenseLowRankCor, self).get_config()
+        config.update({"latent_size" : self.latent_size, "output_size" : self.output_size,
+                       "max_output_size" : self.max_output_size,
+                       "beta_init" : self.beta_init, "beta_reg" : self.beta_reg})
         return config
     
     def compute_output_shape(self, input_shape):
@@ -267,15 +332,12 @@ class LogDenseExp(Layer):
         hidden units are built during training using splitting steepest descent.
     output_size : int
         The number of classes in the DAN.
-    tau_init : float
-        The initial value of the tau parameter, calculated as tau = log(Omega_N(beta_init)/Omega_N(0))
-        for a given initial inverse temperature beta_init in the models module.
     prior_y : tf.Variable, optional
         A prior distribution over the classes. If None, it is initialized to a uniform distribution.
         Defaults to None.
     '''
     def __init__(self, number_constraint_iterations, max_input_size,
-                 output_size, tau_init, prior_y = None, **kwargs):
+                 output_size, prior_y = None, **kwargs):
         super(LogDenseExp, self).__init__(**kwargs)
         
         self.number_constraint_iterations = number_constraint_iterations
@@ -283,8 +345,6 @@ class LogDenseExp(Layer):
         self.max_input_size = max_input_size
 
         self.output_size = output_size
-        
-        self.tau_init = tau_init
         
         if prior_y is None:
             self.prior_y = tf.Variable(tf.ones((output_size,)) / output_size, trainable = False)
@@ -296,8 +356,7 @@ class LogDenseExp(Layer):
     def build(self, input_shape):
         '''
         Add weights to the layer. self.kernel contains the DAN class weights g and g_0,
-        in this order, self.counts_memory is used to normalize the rows of self.kernel,
-        and self.tau is log(Omega_N(beta)/Omega_N(0)) for a given inverse temperature beta.
+        in this order, and self.counts_memory is used to normalize the rows of self.kernel.
 
         Parameters
         ----------
@@ -321,10 +380,6 @@ class LogDenseExp(Layer):
                                                                      self.prior_y, self.counts_memory,
                                                                      self.number_constraint_iterations),
                                       trainable = True)
-        
-        self.tau = self.add_weight(name = "tau", shape = (),
-                                   initializer = Constant(self.tau_init),
-                                   trainable = False)
     
     def call(self, h):
         '''
@@ -339,45 +394,20 @@ class LogDenseExp(Layer):
         tf.Tensor
             The shifted log dot product between exp(h) and the DAN class weights.
         '''
-        @tf.custom_gradient
-        def project_gradient(kernel):
-            '''
-            Approximately project the gradient with respect to the input kernel onto
-            its orthogonal complement, also known as the tangent space (see Appendix F).
-            
-            Parameters
-            ----------
-            kernel : tf.Tensor
-                The kernel whose gradient is to be projected.
-            Returns
-            -------
-            kernel : tf.Tensor
-                The input kernel.
-            grad : function
-                A function that projects the gradient with respect to the input kernel
-                onto its orthogonal complement.
-            '''
-            def grad(upstream):
-                
-                downstream = upstream - k.sum(upstream * kernel, axis = 1, keepdims = True) / self.counts_memory[: self.input_size + 1]
-                
-                return downstream
-            
-            return kernel, grad
-        
-        kernel = project_gradient(self.kernel[: self.input_size + 1])
+        #project_weigh_gradient = tf.custom_gradient(partial(full_project_weigh_gradient, self.counts_memory[: self.input_size + 1]))
+        kernel = project_weigh_gradient(self.kernel[: self.input_size + 1], self.counts_memory[: self.input_size + 1])
         
         c = k.stop_gradient(k.max(h, axis = 1, keepdims = True))
-        c = k.stop_gradient(k.maximum(c, self.tau))
+        c = k.stop_gradient(k.maximum(c, 0))
         
-        return c + k.log(k.dot(k.exp(h - c), kernel[: -1]) + k.exp(self.tau - c) * kernel[-1 :])
+        return c + k.log(k.dot(k.exp(h - c), kernel[: -1]) + k.exp(0 - c) * kernel[-1 :])
     
     # To support serialization
     def get_config(self):
         config = super(LogDenseExp, self).get_config()
         config.update({"number_constraint_iterations" : self.number_constraint_iterations,
-                       "max_input_size" : self.max_input_size, "output_size" : self.output_size,
-                       "tau_init" : self.tau_init, "prior_y" : self.prior_y.value()})
+                       "max_input_size" : self.max_input_size,
+                       "output_size" : self.output_size, "prior_y" : self.prior_y.value()})
         return config
     
     @classmethod

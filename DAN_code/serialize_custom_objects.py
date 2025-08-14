@@ -33,7 +33,8 @@ def collect_custom_objects(local_custom_objects = {}):
                       "AverageTransitionMatrix" : callbacks.AverageTransitionMatrix, "UnitTwoNorm" : constraints.UnitTwoNorm,
                       "AltOneNorm" : constraints.AltOneNorm, "RandomSpherical" : initializers.RandomSpherical,
                       "Categorical" : initializers.Categorical, "Normalize" : layers.Normalize, "DenseCor" : layers.DenseCor,
-                      "LogDenseExp" : layers.LogDenseExp, "RayleighQuotient" : metrics.RayleighQuotient,
+                      "DenseLowRankCor" : layers.DenseLowRankCor, "LogDenseExp" : layers.LogDenseExp,
+                      "RayleighQuotient" : metrics.RayleighQuotient,
                       "SupervisedNegLogLikelihood" : losses.SupervisedNegLogLikelihood,
                       "UnsupervisedNegLogLikelihood" : losses.UnsupervisedNegLogLikelihood, "SMD" : SMD}
     custom_objects.update(local_custom_objects)

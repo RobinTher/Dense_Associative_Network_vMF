@@ -330,20 +330,20 @@ def plot_activations(activations, w = None, g = None, dimensions = None, title =
     
     plt.show()
 
-def plot_accuracy_and_runtime(beta, number_memories_range, number_splits_range, fontsize = 13):
+def plot_accuracy_and_runtime(beta_reg, number_memories_range, number_splits_range, fontsize = 13):
     '''
     Plot the accuracy and run time of DANs trained with and without splitting as a function
     of the maximum number of memories. Assume that the accuracy and training time data
     is stored in Data/Performance with file names of the form
-    DAN_accuracy_and_run_time_with_beta={beta}_and_{number_memories}_memories_for_{number_splits}_splits.npy,
-    where beta and number_memories are the inverse temperature and maximum number of memories
+    DAN_accuracy_and_run_time_with_beta_reg={beta_reg}_and_{number_memories}_memories_for_{number_splits}_splits.npy,
+    where beta_reg and number_memories are the inverse temperature regularization and maximum number of memories
     of the corresponding DANs, respectively, and number_splits is the number of splits of the DANs
     trainined with splitting steepest descent.
 
     Parameters
     ----------
-    beta : float
-        The inverse temperature of the DANs whose accuracy and run time to plot.
+    beta_reg : float
+        The regularization on beta, represented with the character varsigma (ς) in the paper.
     number_memories_range : list of int
         The range of maximum number of memories for which to plot the accuracy and run time
         of the DANs.
@@ -359,16 +359,16 @@ def plot_accuracy_and_runtime(beta, number_memories_range, number_splits_range, 
     run_time_without_splits = []
     accuracy_without_splits = []
     for number_memories, number_splits in zip(number_memories_range, number_splits_range):
-        with open("./Data/Performance/DAN_accuracy_and_run_time_with_beta=%s_and_%s_memories_for_%s_splits.npy"
-                % (str(beta), str(number_memories), str(number_splits)), "rb") as f:
+        with open("./Data/Performance/DAN_accuracy_and_run_time_with_beta_reg=%s_and_%s_memories_for_%s_splits.npy"
+                % (str(beta_reg), str(number_memories), str(number_splits)), "rb") as f:
             run_time = np.load(f)
             accuracy = np.load(f)
         
         run_time_with_splits.append(run_time)
         accuracy_with_splits.append(accuracy)
         
-        with open("./Data/Performance/DAN_accuracy_and_run_time_with_beta=%s_and_%s_memories_for_%s_splits.npy"
-                % (str(beta), str(number_memories), str(0)), "rb") as f:
+        with open("./Data/Performance/DAN_accuracy_and_run_time_with_beta_reg=%s_and_%s_memories_for_%s_splits.npy"
+                % (str(beta_reg), str(number_memories), str(0)), "rb") as f:
             run_time = np.load(f)
             accuracy = np.load(f)
         

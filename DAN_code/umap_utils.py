@@ -39,7 +39,7 @@ def load_contents(filename):
     
     with open(filename, "rb") as f:
         n = 0
-        while True and (n < 200):
+        while True and (n < 140):
             n += 1
             try:
                 if contents is None:
@@ -51,7 +51,7 @@ def load_contents(filename):
     
     return contents
 
-def calculate_overlaps(x_test, beta, name, file_suffix):
+def calculate_overlaps(x_test, beta_reg, name, file_suffix):
     '''
     Calculate the overlaps of test data x_test and saved DAN memories. The parameters
     other than x_test are used to find the name of the file to load.
@@ -60,8 +60,8 @@ def calculate_overlaps(x_test, beta, name, file_suffix):
     ----------
     x_test : np.ndarray
         The test data.
-    beta : float
-        The inverse temperature of the DAN.
+    beta_reg : float
+        The regularization on beta, represented with the character varsigma (ς) in the paper.
     name : str
         The name of the model whose memories to load.
     file_suffix : str
@@ -73,7 +73,7 @@ def calculate_overlaps(x_test, beta, name, file_suffix):
     overlaps : np.ndarray
         The overlaps of the test data with the saved DAN memories.
     '''
-    w = load_contents("./Data/Weights/%s_w_with_beta=%s_and_%s.npy" % (name, str(beta), file_suffix))
+    w = load_contents("./Data/Weights/%s_w_with_beta_reg=%s_and_%s.npy" % (name, str(beta_reg), file_suffix))
     
     overlaps = func.dense_cor(x_test, w.T).T
     
@@ -99,7 +99,7 @@ def train_umap(overlaps, seed):
     
     return umap_model
 
-def umap_embedding(overlaps, umap_model, beta, name, file_suffix):
+def umap_embedding(overlaps, umap_model, beta_reg, name, file_suffix):
     '''
     Calculate the UMAP embedding of overlap data calculated with calculate_overlaps
     and save it to a file. The parameters other than overlaps and umap_model are used
@@ -111,8 +111,8 @@ def umap_embedding(overlaps, umap_model, beta, name, file_suffix):
         Overlap data to calculate the UMAP embedding.
     umap_model : umap.UMAP
         A trained UMAP model.
-    beta : float
-        The inverse temperature of the DAN for which the overlaps were calculated.
+    beta_reg : float
+        The regularization on beta, represented with the character varsigma (ς) in the paper.
     name : str
         The name of the model for which the overlaps were calculated.
     file_suffix : str
@@ -123,19 +123,19 @@ def umap_embedding(overlaps, umap_model, beta, name, file_suffix):
     '''
     embedding = umap_model.transform(overlaps)
     
-    with open("./Data/Overlaps/%s_embedded_overlaps_with_beta=%s_and_%s.npy" % (name, str(beta), file_suffix), "wb") as f:
+    with open("./Data/Overlaps/%s_embedded_overlaps_with_beta_reg=%s_and_%s.npy" % (name, str(beta_reg), file_suffix), "wb") as f:
         np.save(f, embedding)
 
 ### May need a different environment to make it work!
-def plot_umap(beta, name):
+def plot_umap(beta_reg, name):
     '''
     Plot the UMAP embedding of overlap data loaded from files. The parameters
-    beta and name are used to find the files to load.
+    beta_reg and name are used to find the files to load.
 
     Parameters
     ----------
-    beta : float
-        The inverse temperature of the DAN for which the overlaps were calculated.
+    beta_reg : float
+        The regularization on beta, represented with the character varsigma (ς) in the paper.
     name : str
         The name of the model for which the overlaps were calculated.
     '''
@@ -143,10 +143,10 @@ def plot_umap(beta, name):
     
     set_ylabel = True
     for file_suffix, axis in zip(["without_splitting", "with_splitting"], axes):
-        with open("./Data/Overlaps/%s_embedded_overlaps_with_beta=%s_and_%s.npy" % (name, str(beta), file_suffix), "rb") as f:
+        with open("./Data/Overlaps/%s_embedded_overlaps_with_beta_reg=%s_and_%s.npy" % (name, str(beta_reg), file_suffix), "rb") as f:
             embedding = np.load(f)
         
-        g = load_contents("./Data/Weights/%s_g_with_beta=%s_and_%s.npy" % (name, str(beta), file_suffix))
+        g = load_contents("./Data/Weights/%s_g_with_beta_reg=%s_and_%s.npy" % (name, str(beta_reg), file_suffix))
         
         df = pd.DataFrame(data = np.concatenate([embedding, g[np.newaxis].T], axis = -1), columns = ("x", "y", "class"))
         df["class"] = df["class"].astype("int").astype("category")

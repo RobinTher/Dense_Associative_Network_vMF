@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 import DAN_code.result_plotting as res_plot
 
-def sort_memories(model, number_memories, dimension = 5, fontsize = 10):
+def sort_memories(model, w, dimension = 5, fontsize = 10):
     '''
     Sort the memories of a DAN by the classes that they are recognized as
     and plot them. Also plot the corresponding class weights.
@@ -27,7 +27,8 @@ def sort_memories(model, number_memories, dimension = 5, fontsize = 10):
     fontsize : int, optional
         The font size of the labels and ticks. Defaults to 10.
     '''
-    w = model.get_DAN_layer(1).get_weights()[0].T
+    w = w.T
+    number_memories = len(w)
     g = model.get_DAN_layer(2).get_weights()[0]
     
     y_hard = np.argmax(model.predict(w), axis = 1)
@@ -51,15 +52,15 @@ def top_activated_memories(x_test, model, x_init = None):
     y_pred = np.argmax(model.predict(x_test), axis = -1)
     y_1NN = first_neighbor(x_test, w, g)
     
-    beta = model.get_DAN_layer(1).beta
-    tau = model.get_DAN_layer(2).tau
+    beta = model.get_DAN_layer(1).beta.numpy()
+    beta_reg = model.get_DAN_layer(1).beta_reg
     
     counts_memory = np.squeeze(model.get_DAN_layer(2).counts_memory)
     
     x = x_test - np.mean(x_test, axis = 1, keepdims = True)
-    h = beta * func.dense_cor(x, w)
+    h = beta_reg*beta * func.dense_cor(x, w)
     
-    p_h = func.softmax(h + np.log(counts_memory[: -1]), tau + np.log(counts_memory[-1 :]), axis = -1)
+    p_h = func.softmax(h - func.log_gamma_ratio(self.beta, x.shape[1]) + np.log(counts_memory[: -1]), np.log(counts_memory[-1 :]), axis = -1)
     res_plot.plot_images(p_h @ w.T)
     
     for p_h_cur, y_pred_cur, y_1NN_cur in zip(p_h, y_pred, y_1NN):
@@ -82,17 +83,14 @@ def linear_decomposition(x_final, x_init, y_target, model, softening):
     
     counts_memory = model.get_DAN_layer(2).counts_memory.numpy()
     
-    beta = model.get_DAN_layer(1).beta
-    tau = model.get_DAN_layer(2).tau
+    beta = model.get_DAN_layer(1).beta.numpy()
+    beta_reg = model.get_DAN_layer(1).beta_reg
     
-    h = beta * func.dense_cor(x_final, w)
-    
-    #prob_memory_given_target = func.weighed_softmax(h, g, tau, y_target)
-    #prob_memory = 1/(1 - softening) * func.weighed_softmax(h, counts_memory, tau) - softening/(1 - softening) / (y_target.shape[1] + 1) * func.weighed_softmax(h, g, tau)
+    h = beta_reg*beta * func.dense_cor(x_final, w)
     
     y_target = (1 - softening) * y_target + softening / (y_target.shape[1] + 1)
-    prob_memory_given_target = func.weighed_softmax(h, g, tau, y_target)
-    prob_memory = func.weighed_softmax(h, counts_memory, tau)
+    prob_memory_given_target = func.weighed_softmax(h, g, 0., y_target)
+    prob_memory = func.weighed_softmax(h, counts_memory, 0.)
     
     w_mean_given_target = prob_memory_given_target @ w.T
     w_mean = prob_memory @ w.T
@@ -222,8 +220,10 @@ def first_neighbor_fidelity(x_test, y_hard, y_pred, w, g):
     print("1NN fidelity on fail: " + str(np.mean(y_1NN[idx_fail] == y_pred[idx_fail])))
 
 ### Plot some misclassified digits
-def misclassified_digits(x_test, y_hard, model):
+def misclassified_digits(x_test, y_hard, model, dimension = 5, fontsize = 10):
     p_hard = np.argmax(model.predict(x_test), axis = 1)
     x_miss = x_test[p_hard != y_hard]
-    for i in range(x_miss.shape[0] // 25):
-        res_plot.plot_images(x_miss[25 * i : 25 * (i + 1)])
+    
+    area = dimension**2
+    for i in range(x_miss.shape[0] // area):
+        res_plot.plot_images(x_miss[area * i : area * (i + 1)], fontsize = fontsize)

@@ -15,6 +15,12 @@ def jax_sqrt1pm1(x):
     '''
     return jnp.where(x < 1, x / ((1 + x)**(1/2) + 1), (1 + x)**(1/2) - 1)
 
+def tensor_sqrt1pm1(x):
+    '''
+    Helper function for TensorFlow.
+    '''
+    return x / ((1 + x)**(1/2) + 1) #tf.where(x < 1, x / ((1 + x)**(1/2) + 1), (1 + x)**(1/2) - 1)
+
 def log1p_sqrt1p_mlog2(x):
     '''
     Helper function.
@@ -26,6 +32,12 @@ def jax_log1p_sqrt1p_mlog2(x):
     Helper function for JAX. Currently not used.
     '''
     return 1/2 * jnp.log1p(x) + jnp.log1p(1/(1 + x)**(1/2)) - jnp.log(2)
+
+def tensor_log1p_sqrt1p_mlog2(x):
+    '''
+    Helper function for TensorFlow.
+    '''
+    return 1/2 * tf.math.log1p(x) + tf.math.log1p(1/(1 + x)**(1/2)) - tf.math.log(2.)
 
 ### Calculate correlation(w, x) when w and x are numpy arrays
 def dense_cor(x, w):
@@ -84,7 +96,7 @@ def weighed_softmax(f, g, tau = -np.inf, target_y = None, softening = 0):
 def log_gamma_ratio(beta, N):
     '''
     Calculate log(Omega_N(beta)/Omega_N(0)), with Omega_N(kappa) defined in the paper.
-    We use the large N approximation of Appendix B for simplicity.
+    We use the large N approximation of Appendix C for simplicity.
     '''
     rho = beta / (N - 2)
     two_rho_squared = (2 * rho)**2
@@ -98,7 +110,7 @@ def log_gamma_ratio(beta, N):
 def jax_log_gamma_ratio(beta, N):
     '''
     Calculate log(Omega_N(beta)/Omega_N(0)), with Omega_N(kappa) defined in the paper.
-    We use the large N approximation of Appendix B for simplicity.
+    We use the large N approximation of Appendix C for simplicity.
     This is the JAX version, which is currently not used.
     '''
     rho = beta / (N - 2)
@@ -110,6 +122,21 @@ def jax_log_gamma_ratio(beta, N):
     
     return tau
 
+def tensor_log_gamma_ratio(beta, N):
+    '''
+    Calculate log(Omega_N(beta)/Omega_N(0)), with Omega_N(kappa) defined in the paper.
+    We use the large N approximation of Appendix C for simplicity.
+    This is the TensorFlow version.
+    '''
+    rho = beta / (N - 2)
+    two_rho_squared = (2 * rho)**2
+    
+    eta = tensor_sqrt1pm1(two_rho_squared) - tensor_log1p_sqrt1p_mlog2(two_rho_squared)
+    
+    tau = -1/4 * tf.math.log1p(two_rho_squared) + (N/2 - 1) * eta
+    
+    return tau
+
 def unaveraged_rayleigh_quotient(beta, h, x, w, u):
     '''
     Calculate the function F(phi ; theta, x) of the paper (see Appendix H),
@@ -118,11 +145,7 @@ def unaveraged_rayleigh_quotient(beta, h, x, w, u):
     w_u = k.sum(w * u, axis = 0)
     x_u = k.dot(x, u)
     
-    q = (x_u - h * w_u)**2
-    q = beta * q
-    
-    q = q + h * (w_u - 1) * (w_u + 1)
-    beta = beta * q
+    q = beta**2 * (x_u - h * w_u)**2 + beta * h * (w_u - 1) * (w_u + 1)
     
     return q
 

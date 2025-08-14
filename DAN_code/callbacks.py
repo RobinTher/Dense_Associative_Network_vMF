@@ -6,9 +6,42 @@ from tensorflow.keras.callbacks import Callback
 
 import DAN_code.functions as func
 
+class BetaEvolution(Callback):
+    '''
+    Callback the inverse temperature beta of the DAN during training.
+
+    Attributes
+    ----------
+    name : str
+        The name of the model, used to name the saved weights.
+    '''
+    def __init__(self, name):
+        super(BetaEvolution, self).__init__()
+        self.name = name
+    
+    def on_epoch_end(self, epoch, logs = None):
+        '''
+        Save the weights of the DAN at the end of each epoch.
+
+        Parameters
+        ----------
+        epoch : int
+            The index of the current epoch, starting from 0.
+            Not used in this method, but kept for consistency with the callback interface.
+        logs : dict, optional
+            A dictionary containing logs of losses and metrics.
+            Not used in this method, but can be useful for debugging.
+        '''
+        beta = np.squeeze(self.model.get_DAN_layer(1).beta.numpy())
+        beta_reg = self.model.get_DAN_layer(1).beta_reg
+        #print(beta)
+        
+        with open("./Data/Weights/%s_beta_with_beta_reg=%s.npy" % (self.name, str(beta_reg)), "ab") as f:
+            np.save(f, beta)
+
 class BetaScheduler(Callback):
     '''
-    Cooling schedule for the inverse temperature beta of the DAN.
+    Cooling schedule that can be used for the inverse temperature beta of the DAN.
     The inverse temperature is annealed from its initial value to a final value
     using a power law. The slope of the power law
     and the number of annealing epochs can be adjusted.
@@ -70,15 +103,9 @@ class BetaScheduler(Callback):
         if progress < 1:
             beta = (self.beta_final - self.beta_init) * progress**self.slope / (progress**self.slope + (1 - progress)**self.slope) + self.beta_init
         else:
-            beta = self.beta_final
+            beta = tf.constant([self.beta_final], dtype = "float32")
         
-        self.model.get_DAN_layer(1).beta.assign(tf.cast(beta, dtype = "float32"))
-        
-        try:
-            tau = func.log_gamma_ratio(beta, self.number_features)
-            self.model.get_DAN_layer(2).tau.assign(tf.cast(tau, dtype = "float32"))
-        except:
-            pass
+        self.model.get_DAN_layer(1).beta.assign(beta)
 
 class ToggleMetric(Callback):
     def __init__(self, metric_name):
@@ -102,8 +129,8 @@ class WeightEvolution(Callback):
 
     Attributes
     ----------
-    beta : float
-        The inverse temperature of the DAN, used to name the saved weights.
+    beta_reg : float
+        The regularization on beta, represented with the character varsigma (ς) in the paper. Used to name the saved weights.
     number_memories : int
         The number of DAN memories to save.
     name : str
@@ -115,9 +142,9 @@ class WeightEvolution(Callback):
         weights to their argmax if the weights are not saved to make movies. Such
         compressed class weights are also the classes of the corresponding memories.
     '''
-    def __init__(self, beta, number_memories, name, file_suffix):
+    def __init__(self, beta_reg, number_memories, name, file_suffix):
         super(WeightEvolution, self).__init__()
-        self.beta = beta
+        self.beta_reg = beta_reg
         self.number_memories = number_memories
         self.name = name
         self.file_suffix = file_suffix
@@ -129,7 +156,7 @@ class WeightEvolution(Callback):
 
         Parameters
         ----------
-        batch : int
+        epoch : int
             The index of the current epoch, starting from 0.
             Not used in this method, but kept for consistency with the callback interface.
         logs : dict, optional
@@ -138,7 +165,7 @@ class WeightEvolution(Callback):
         '''
         w = self.model.get_DAN_layer(1).get_weights()[0][:, : self.number_memories].T
         
-        with open("./Data/Weights/%s_w_with_beta=%s_and_%s.npy" % (self.name, str(self.beta), self.file_suffix), "ab") as f:
+        with open("./Data/Weights/%s_w_with_beta_reg=%s_and_%s.npy" % (self.name, str(self.beta_reg), self.file_suffix), "ab") as f:
             np.save(f, w)
         
         if len(self.model.layers) >= self.model.number_preproc_layers + 3:
@@ -147,7 +174,7 @@ class WeightEvolution(Callback):
             else:
                 g = self.model.get_DAN_layer(2).get_weights()[0][: self.number_memories].T
             
-            with open("./Data/Weights/%s_g_with_beta=%s_and_%s.npy" % (self.name, str(self.beta), self.file_suffix), "ab") as f:
+            with open("./Data/Weights/%s_g_with_beta_reg=%s_and_%s.npy" % (self.name, str(self.beta_reg), self.file_suffix), "ab") as f:
                 np.save(f, g)
 
 class AverageTransitionMatrix(Callback):

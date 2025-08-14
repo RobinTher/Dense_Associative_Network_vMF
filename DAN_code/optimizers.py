@@ -64,7 +64,7 @@ class SMD(Optimizer):
         self.rayleigh_quotients_squared = []
         for var in var_list:
             given_name = None
-            for allowed_given_name in ["eigvec_kernel", "memory_kernel", "weigh_kernel"]:
+            for allowed_given_name in ["eigvec_kernel", "memory_kernel", "basis_kernel", "weigh_kernel"]:
                 if allowed_given_name in var.name:
                     given_name = allowed_given_name
                     break
@@ -76,9 +76,7 @@ class SMD(Optimizer):
             if given_name == "eigvec_kernel":
                 self.rayleigh_quotients_squared.append(self.add_variable_from_reference(var, "rayleigh_quotients_squared", shape = (var.shape[1],)))
             else:
-                #self.rayleigh_quotients_squared.append(None)
-                #self.rayleigh_quotients_squared.append(self.add_variable_from_reference(var, "placeholder", shape = ()))
-                self.rayleigh_quotients_squared.append(self.add_variable_from_reference(var, "placeholder", shape = (var.shape[1],)))
+                self.rayleigh_quotients_squared.append(self.add_variable_from_reference(var, "placeholder", shape = (1,)))
     
     def update_step(self, grad, var):
         '''
@@ -94,12 +92,12 @@ class SMD(Optimizer):
         var : tf.Variable
             The variable to update.
         '''
+        if isinstance(grad, tf.IndexedSlices):
+            raise NotImplementedError("Sparse updates not implemented.")
+        
         learning_rate = tf.cast(self.learning_rate, var.dtype)
         momentum = tf.cast(self.momentum, var.dtype)
         smoothing = tf.cast(self.smoothing, var.dtype)
-        
-        if isinstance(grad, tf.IndexedSlices):
-            raise NotImplementedError("Sparse updates not implemented.")
         
         var_key = self._var_key(var)
         given_name = self.given_names[self._index_dict[var_key]]
@@ -117,6 +115,13 @@ class SMD(Optimizer):
         if given_name == "weigh_kernel":
             var.assign(k.log(var) + learning_rate * velocity)
             var.assign(k.exp(var - k.max(var, axis = 1, keepdims = True)))
+        
+        elif given_name == "basis_kernel":
+            var_minus_velocity = tf.concat([tf.transpose(var), -tf.transpose(velocity)], axis = 0)
+            velocity_var = tf.concat([velocity, var], axis = 1)
+            
+            var.assign(var + learning_rate/2 * (velocity - k.dot(var, k.dot(tf.transpose(velocity), var))))
+            var.assign(var + learning_rate/2 * k.dot(velocity_var, tf.linalg.solve(tf.eye(2*velocity.shape[1]) - learning_rate/2 * k.dot(var_minus_velocity, velocity_var), k.dot(var_minus_velocity, var))))
 
         else:
             var.assign(var + learning_rate * velocity)

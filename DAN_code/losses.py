@@ -6,7 +6,7 @@ from tensorflow.keras.losses import Loss
 
 class SupervisedNegLogLikelihood(Loss):
     '''
-    Used for training our model in a supervised manner.
+    Effective loss used for training our model in a supervised manner.
 
     Parameters
     ----------
@@ -46,8 +46,17 @@ class SupervisedNegLogLikelihood(Loss):
 
 class UnsupervisedNegLogLikelihood(Loss):
     '''
-    Used for training our model in an unsupervised manner.
+    Effective loss used for training our model in an unsupervised manner.
+
+    Parameters
+    ----------
+    softening : float
+        The amount of label softening, also known as label smoothing.
     '''
+    def __init__(self, softening):
+        super(UnsupervisedNegLogLikelihood, self).__init__()
+        self.softening = softening
+    
     def __call__(self, y_true, h_pred, sample_weight = None):
         '''
         Evaluate the loss function.
@@ -66,9 +75,12 @@ class UnsupervisedNegLogLikelihood(Loss):
         tf.Tensor
             The computed loss value.
         '''
-        
-        y_pred = k.softmax(h_pred, axis = -1)
+        y_pred = (1 - self.softening) * k.softmax(h_pred, axis = -1) + self.softening / h_pred.shape[-1]
             
         f_pred = k.sum(y_pred * h_pred, axis = -1)
         
         return -k.mean(f_pred)
+    
+    # To support serialization
+    def get_config(self):
+        return {"softening" : self.softening}
