@@ -330,7 +330,9 @@ def plot_activations(activations, w = None, g = None, dimensions = None, title =
     
     plt.show()
 
-def plot_accuracy_and_runtime(beta_reg, number_memories_range, number_splits_range, fontsize = 13):
+def plot_accuracy_and_runtime(beta_reg, number_memories_with_splits_range,
+                              number_memories_without_splits_range,
+                              number_splits_range, filename = None, fontsize = 13):
     '''
     Plot the accuracy and run time of DANs trained with and without splitting as a function
     of the maximum number of memories. Assume that the accuracy and training time data
@@ -344,13 +346,19 @@ def plot_accuracy_and_runtime(beta_reg, number_memories_range, number_splits_ran
     ----------
     beta_reg : float
         The regularization on beta, represented with the character varsigma (ς) in the paper.
-    number_memories_range : list of int
+    number_memories_with_splits_range : list of int
         The range of maximum number of memories for which to plot the accuracy and run time
-        of the DANs.
+        of the DANs trained with splitting.
+    number_memories_without_splits_range : list of int
+        The range of maximum number of memories for which to plot the accuracy and run time
+        of the DANs trained without splitting.
     number_splits_range : list of int
         The range of number of splits for which to plot the accuracy and run time of the DANs
         trained with splitting steepest descent. DANs trained without splitting have
         number_splits = 0. This list must have the same length as number_memories_range.
+    filename : str, optional
+        If provided, saves the plot to a file with the given filename.
+        Defaults to None for no file saving.
     fontsize : int, optional
         The font size of labels and ticks. Defaults to 13.
     '''
@@ -358,7 +366,7 @@ def plot_accuracy_and_runtime(beta_reg, number_memories_range, number_splits_ran
     accuracy_with_splits = []
     run_time_without_splits = []
     accuracy_without_splits = []
-    for number_memories, number_splits in zip(number_memories_range, number_splits_range):
+    for number_memories, number_splits in zip(number_memories_with_splits_range, number_splits_range):
         with open("./Data/Performance/DAN_accuracy_and_run_time_with_beta_reg=%s_and_%s_memories_for_%s_splits.npy"
                 % (str(beta_reg), str(number_memories), str(number_splits)), "rb") as f:
             run_time = np.load(f)
@@ -366,7 +374,8 @@ def plot_accuracy_and_runtime(beta_reg, number_memories_range, number_splits_ran
         
         run_time_with_splits.append(run_time)
         accuracy_with_splits.append(accuracy)
-        
+    
+    for number_memories in number_memories_without_splits_range:
         with open("./Data/Performance/DAN_accuracy_and_run_time_with_beta_reg=%s_and_%s_memories_for_%s_splits.npy"
                 % (str(beta_reg), str(number_memories), str(0)), "rb") as f:
             run_time = np.load(f)
@@ -397,22 +406,22 @@ def plot_accuracy_and_runtime(beta_reg, number_memories_range, number_splits_ran
     fig_axis = fig.add_subplot(111, frameon = False)
     plt.tick_params(labelcolor = "none", which = "both", top = False, bottom = False, left = False, right = False)
 
-    axes[0].errorbar(number_memories_range, mean_accuracy_with_splits, std_accuracy_with_splits,
+    axes[0].errorbar(number_memories_with_splits_range, mean_accuracy_with_splits, std_accuracy_with_splits,
                     marker = "o", linestyle = "--", capsize = 2, zorder = 2.5, color = "C0",
                     markersize = 4, label = "Splitting")
-    axes[0].errorbar(number_memories_range, mean_accuracy_without_splits, std_accuracy_without_splits,
-                    marker = "o", linestyle = "--", capsize = 2, zorder = 1.5, color = "C1",
+    axes[0].errorbar(number_memories_without_splits_range, mean_accuracy_without_splits, std_accuracy_without_splits,
+                    marker = "o", linestyle = "-", capsize = 2, zorder = 1.5, color = "C1",
                     markersize = 4, label = "No splitting")
     axes[0].legend(fontsize = fontsize)
-    axes[0].set_xticks(number_memories_range)
+    axes[0].set_xticks(number_memories_without_splits_range)
     axes[0].set_ylabel(r"Accuracy", fontsize = fontsize)
     axes[0].tick_params(axis = "both", which = "both", labelsize = fontsize)
 
-    axes[1].errorbar(number_memories_range, mean_run_time_with_splits, std_run_time_with_splits,
+    axes[1].errorbar(number_memories_with_splits_range, mean_run_time_with_splits, std_run_time_with_splits,
                     marker = "o", linestyle = "--", capsize = 2, zorder = 2.5, color = "C0", markersize = 4)
-    axes[1].errorbar(number_memories_range, mean_run_time_without_splits, std_run_time_without_splits,
-                    marker = "o", linestyle = "--", capsize = 2, zorder = 1.5, color = "C1", markersize = 4)
-    axes[1].set_xticks(number_memories_range)
+    axes[1].errorbar(number_memories_without_splits_range, mean_run_time_without_splits, std_run_time_without_splits,
+                    marker = "o", linestyle = "-", capsize = 2, zorder = 1.5, color = "C1", markersize = 4)
+    axes[1].set_xticks(number_memories_without_splits_range)
     axes[1].yaxis.tick_right()
     axes[1].yaxis.set_label_position("right")
     axes[1].set_ylabel(r"Training time", fontsize = fontsize, rotation = -90, labelpad = 17)
@@ -422,39 +431,42 @@ def plot_accuracy_and_runtime(beta_reg, number_memories_range, number_splits_ran
                                 "shrink" : 1, "color" : "black"})
 
     fig_axis.set_xlabel(r"Max number memories $P_{\mathrm{max}}$", fontsize = fontsize)
+    plt.tight_layout()
+    if filename is not None:
+        plt.savefig("./Data/Figures/%s.png" % filename)
     plt.show()
 
     fig, axes = plt.subplots(1, 2, sharex = True, figsize = (8, 4))
     fig_axis = fig.add_subplot(111, frameon = False)
     plt.tick_params(labelcolor = "none", which = "both", top = False, bottom = False, left = False, right = False)
 
-    axes[0].plot(number_memories_range, mean_accuracy_with_splits,
+    axes[0].plot(number_memories_with_splits_range, mean_accuracy_with_splits,
                 marker = "none", linestyle = "--", zorder = 2.5, color = "C0",
                 label = "Splitting")
-    axes[0].plot(number_memories_range, mean_accuracy_without_splits,
-                marker = "none", linestyle = "--", zorder = 1.5, color = "C1",
+    axes[0].plot(number_memories_without_splits_range, mean_accuracy_without_splits,
+                marker = "none", linestyle = "-", zorder = 1.5, color = "C1",
                 label = "No splitting")
 
-    axes[0].plot(number_memories_range, accuracy_with_splits, marker = "o",
-                markersize = 2, linestyle = "none", zorder = 2.5, color = "C0")
-    axes[0].plot(number_memories_range, accuracy_without_splits,
-                markersize = 2, marker = "o", linestyle = "none", zorder = 1.5, color = "C1")
+    axes[0].plot(number_memories_with_splits_range, accuracy_with_splits, marker = "o",
+                 markersize = 2, linestyle = "none", zorder = 2.5, color = "C0")
+    axes[0].plot(number_memories_without_splits_range, accuracy_without_splits,
+                 markersize = 2, marker = "o", linestyle = "none", zorder = 1.5, color = "C1")
 
     axes[0].legend(fontsize = fontsize)
-    axes[0].set_xticks(number_memories_range)
+    axes[0].set_xticks(number_memories_without_splits_range)
     axes[0].set_ylabel(r"Accuracy", fontsize = fontsize)
     axes[0].tick_params(axis = "both", which = "both", labelsize = fontsize)
 
-    axes[1].plot(number_memories_range, mean_run_time_with_splits,
+    axes[1].plot(number_memories_with_splits_range, mean_run_time_with_splits,
                 marker = "none", linestyle = "--", zorder = 2.5, color = "C0")
-    axes[1].plot(number_memories_range, mean_run_time_without_splits,
-                marker = "none", linestyle = "--", zorder = 1.5, color = "C1")
+    axes[1].plot(number_memories_without_splits_range, mean_run_time_without_splits,
+                marker = "none", linestyle = "-", zorder = 1.5, color = "C1")
 
-    axes[1].plot(number_memories_range, run_time_with_splits,
+    axes[1].plot(number_memories_with_splits_range, run_time_with_splits,
                 marker = "o", markersize = 2, linestyle = "none", zorder = 2.5, color = "C0")
-    axes[1].plot(number_memories_range, run_time_without_splits,
+    axes[1].plot(number_memories_without_splits_range, run_time_without_splits,
                 marker = "o", markersize = 2, linestyle = "none", zorder = 1.5, color = "C1")
-    axes[1].set_xticks(number_memories_range)
+    axes[1].set_xticks(number_memories_without_splits_range)
     axes[1].yaxis.tick_right()
     axes[1].yaxis.set_label_position("right")
     axes[1].set_ylabel(r"Training time", fontsize = fontsize, rotation = -90, labelpad = 17)
