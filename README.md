@@ -1,4 +1,4 @@
-Run "Dense_Associative_Network_Example.ipynb" and "Umap.ipynb" to reproduce the figures of the paper. The term "dense associative network" refers to the implementation of dense associative memory studied in the paper. "Umap.ipynb" is only needed for Fig. (3). Markdown cells indicate which groups of cells must be ran to reproduced each figure.
+Run "Dense_Associative_Network_Example.ipynb" and "Umap.ipynb" to reproduce the figures of the paper https://arxiv.org/abs/2508.19151. The term "dense associative network" refers to the implementation of dense associative memory studied in the paper. "Umap.ipynb" is only needed for Fig. (5). Markdown cells indicate which groups of cells must be ran to reproduced each figure.
 
 Figures were originally made using python 3.8.5 with two separate environments for "Dense_Associative_Network_Example.ipynb" and "Umap.ipynb". The environment of "Dense_Associative_Network_Example.ipynb" was set up with numpy 1.24.4, matplotlib 3.7.5, tensorflow 2.13.1 and cmasher 1.6.3. The environment of "Umap.ipynb" was set up with numpy 1.23.5, matplotlib 3.2.2, umap 0.5.7, pandas 1.5.3, datashader 0.15.2 and seaborn 0.13.2.
 
