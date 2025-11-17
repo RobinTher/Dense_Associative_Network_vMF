@@ -332,15 +332,16 @@ def plot_activations(activations, w = None, g = None, dimensions = None, title =
 
 def plot_accuracy_and_runtime(beta_reg, number_memories_with_splits_range,
                               number_memories_without_splits_range,
-                              number_splits_range, filename = None, fontsize = 13):
+                              number_splits_range, dataset_name = "mnist",
+                              title = None, filename = None, fontsize = 13):
     '''
     Plot the accuracy and run time of DANs trained with and without splitting as a function
     of the maximum number of memories. Assume that the accuracy and training time data
     is stored in Data/Performance with file names of the form
-    DAN_accuracy_and_run_time_with_beta_reg={beta_reg}_and_{number_memories}_memories_for_{number_splits}_splits.npy,
+    DAN_accuracy_and_run_time_on_{dataset_name}_with_beta_reg={beta_reg}_and_{number_memories}_memories_for_{number_splits}_splits.npy,
     where beta_reg and number_memories are the inverse temperature regularization and maximum number of memories
-    of the corresponding DANs, respectively, and number_splits is the number of splits of the DANs
-    trainined with splitting steepest descent.
+    of the corresponding DANs, respectively, dataset_name is the name of the dataset on which the DANs were trained
+    and number_splits is the number of splits of the DANs trainined with splitting steepest descent.
 
     Parameters
     ----------
@@ -356,6 +357,10 @@ def plot_accuracy_and_runtime(beta_reg, number_memories_with_splits_range,
         The range of number of splits for which to plot the accuracy and run time of the DANs
         trained with splitting steepest descent. DANs trained without splitting have
         number_splits = 0. This list must have the same length as number_memories_range.
+    dataset_name : str, optional
+        The name of the dataset on which the DANs were trained. Defaults to mnist.
+    title : str, optional
+        Optional plot title. Defaults to None for no title.
     filename : str, optional
         If provided, saves the plot to a file with the given filename.
         Defaults to None for no file saving.
@@ -367,8 +372,8 @@ def plot_accuracy_and_runtime(beta_reg, number_memories_with_splits_range,
     run_time_without_splits = []
     accuracy_without_splits = []
     for number_memories, number_splits in zip(number_memories_with_splits_range, number_splits_range):
-        with open("./Data/Performance/DAN_accuracy_and_run_time_with_beta_reg=%s_and_%s_memories_for_%s_splits.npy"
-                % (str(beta_reg), str(number_memories), str(number_splits)), "rb") as f:
+        with open("./Data/Performance/DAN_accuracy_and_run_time_on_%s_with_beta_reg=%s_and_%s_memories_for_%s_splits.npy"
+                % (dataset_name, str(beta_reg), str(number_memories), str(number_splits)), "rb") as f:
             run_time = np.load(f)
             accuracy = np.load(f)
         
@@ -376,8 +381,8 @@ def plot_accuracy_and_runtime(beta_reg, number_memories_with_splits_range,
         accuracy_with_splits.append(accuracy)
     
     for number_memories in number_memories_without_splits_range:
-        with open("./Data/Performance/DAN_accuracy_and_run_time_with_beta_reg=%s_and_%s_memories_for_%s_splits.npy"
-                % (str(beta_reg), str(number_memories), str(0)), "rb") as f:
+        with open("./Data/Performance/DAN_accuracy_and_run_time_on_%s_with_beta_reg=%s_and_%s_memories_for_%s_splits.npy"
+                % (dataset_name, str(beta_reg), str(number_memories), str(0)), "rb") as f:
             run_time = np.load(f)
             accuracy = np.load(f)
         
@@ -431,6 +436,8 @@ def plot_accuracy_and_runtime(beta_reg, number_memories_with_splits_range,
                                 "shrink" : 1, "color" : "black"})
 
     fig_axis.set_xlabel(r"Max number memories $P_{\mathrm{max}}$", fontsize = fontsize)
+    if title is not None:
+        plt.title(title, fontsize = fontsize)
     plt.tight_layout()
     if filename is not None:
         plt.savefig("./Data/Figures/%s.png" % filename)
@@ -473,6 +480,9 @@ def plot_accuracy_and_runtime(beta_reg, number_memories_with_splits_range,
     axes[1].tick_params(axis = "both", which = "both", labelsize = fontsize)
 
     fig_axis.set_xlabel(r"Max number memories $P_{\mathrm{max}}$", fontsize = fontsize)
+    if title is not None:
+        plt.title(title, fontsize = fontsize)
+    
     plt.show()
 
 def plot_linear_decomposition(x_true, x_init, w_mean_given_target, w_mean, x_res, x_init_coef, w_mean_given_target_coef, w_mean_coef, x_res_coef, dimensions = None, title = None):
